@@ -35,6 +35,7 @@ describe('templateForPhoto', () => {
   const mine = {
     ...LIBRARY[0],
     version: 3 as const,
+    sport: 'basketball',
     id: 'mine',
     name: 'Mine',
     photoUri: null,

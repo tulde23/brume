@@ -17,6 +17,8 @@ COPY packages/ocr-engine/package.json packages/ocr-engine/
 COPY packages/ocr-engine/src packages/ocr-engine/src
 COPY packages/basketball/package.json packages/basketball/
 COPY packages/basketball/src packages/basketball/src
+COPY packages/track/package.json packages/track/
+COPY packages/track/src packages/track/src
 COPY server/ server/
 RUN cd server && npm test && npm run build
 
@@ -36,7 +38,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /repo/server/dist ./dist
 COPY server/package.json ./
 # Railway mounts volumes as root, so the process runs as root to write the database.
-VOLUME ["/data"]
+# No VOLUME line: Railway refuses it and attaches its own volume at /data (docker run -v works locally).
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8787)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

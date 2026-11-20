@@ -1,6 +1,17 @@
-import { anchorsFrom, mapRect, matchLayout, type Anchor, type LayoutMatch, type NormRect, type TextLine } from '@inkstat/ocr-engine';
+import {
+  alignTemplateParts as alignIn,
+  anchorsForTemplate,
+  matchLibrary as matchIn,
+  templateForPhoto as forPhotoIn,
+  type BuiltinLayout as GenericLayout,
+  type LayoutMatch,
+  type LibraryMatch as GenericMatch,
+  type NormRect,
+  type TemplateSource,
+  type TextLine,
+} from '@inkstat/ocr-engine';
 
-import { partSpec, type Band, type PartId, type ScorebookTemplate } from '../scorebook';
+import { CATALOG, SPORT_ID, type Band, type PartId, type ScorebookTemplate } from '../scorebook';
 import championAnchors from './nfhs-champion.anchors.json';
 import scoreRightAnchors from './scoreright.anchors.json';
 
@@ -12,16 +23,8 @@ import scoreRightAnchors from './scoreright.anchors.json';
  *
  * Layouts only: no photos, names or scores are stored here.
  */
-export interface BuiltinLayout {
-  id: string;
-  name: string;
-  family: 'NFHS' | 'NCAA' | 'FIBA';
-  description: string;
-  anchors: Anchor[];
-  enabled: PartId[];
-  parts: Partial<Record<PartId, NormRect | Band>>;
-  variants: ScorebookTemplate['variants'];
-}
+export type BuiltinLayout = GenericLayout<PartId>;
+export type LibraryMatch = GenericMatch<PartId>;
 
 export const LIBRARY: BuiltinLayout[] = [
   {
@@ -68,97 +71,18 @@ export const LIBRARY: BuiltinLayout[] = [
   },
 ];
 
-/** A match is believable when enough labels line up: a share of the layout's anchors, and a minimum count. */
-const MIN_SCORE = 0.25;
-const MIN_INLIERS = 6;
+/** The built-in scorebook this photo is, if any. */
+export const matchLibrary = (lines: TextLine[], library: BuiltinLayout[] = LIBRARY): LibraryMatch | null => matchIn(lines, library);
 
-export interface LibraryMatch {
-  layout: BuiltinLayout;
-  match: LayoutMatch;
-}
+/** Parts mapped from reference coordinates onto a photo. */
+export const alignParts = (parts: Partial<Record<PartId, NormRect | Band>>, match: LayoutMatch) => alignIn(parts, match, CATALOG);
 
-/** The built-in layout this photo is, if any (best match by share of anchors found). */
-export function matchLibrary(lines: TextLine[], library: BuiltinLayout[] = LIBRARY): LibraryMatch | null {
-  let best: LibraryMatch | null = null;
-  for (const layout of library) {
-    const match = matchLayout(layout.anchors, lines);
-    if (!match || match.score < MIN_SCORE || match.inliers < MIN_INLIERS) continue;
-    if (!best || match.score > best.match.score) best = { layout, match };
-  }
-  return best;
-}
+export { anchorsForTemplate, type TemplateSource };
 
 /**
- * Parts mapped from reference coordinates onto a photo. Bands are mapped as the
- * full column (rows height) and keep only their new left edge and width.
+ * The template to read this photo with: the user's template lined up with the
+ * photo when its saved labels match, else as saved; with no template, a built-in
+ * book the photo is recognised as.
  */
-export function alignParts(
-  parts: Partial<Record<PartId, NormRect | Band>>,
-  match: LayoutMatch,
-): Partial<Record<PartId, NormRect | Band>> {
-  const rows = parts.rows as NormRect | undefined;
-  const out: Partial<Record<PartId, NormRect | Band>> = {};
-  for (const [id, v] of Object.entries(parts) as [PartId, NormRect | Band][]) {
-    if (!v) continue;
-    if (partSpec(id).shape === 'band') {
-      if (!rows) continue;
-      const r = mapRect(match.transform, { x: v.x, w: v.w, y: rows.y, h: rows.h });
-      out[id] = { x: r.x, w: r.w };
-    } else {
-      out[id] = mapRect(match.transform, v as NormRect);
-    }
-  }
-  return out;
-}
-
-/** Anchors to keep with a user's own template, so later photos can be lined up with it. */
-export const anchorsForTemplate = (lines: TextLine[]): Anchor[] =>
-  anchorsFrom(lines).map((a) => ({ text: a.text, x: Math.round(a.x * 1000) / 1000, y: Math.round(a.y * 1000) / 1000 }));
-
-export type TemplateSource = 'aligned' | 'as-saved' | 'library' | 'none';
-
-/**
- * The template to read this photo with:
- * - the user's template, lined up with this photo when its saved labels match;
- * - else the user's template as saved (older templates, or labels not found);
- * - with no template, a built-in book the photo is recognised as.
- */
-export function templateForPhoto(
-  template: ScorebookTemplate | null,
-  lines: TextLine[] | null,
-  library: BuiltinLayout[] = LIBRARY,
-): { template: ScorebookTemplate | null; source: TemplateSource; detail: string } {
-  if (template) {
-    if (template.anchors?.length && lines) {
-      const m = matchLayout(template.anchors, lines);
-      if (m && m.score >= MIN_SCORE && m.inliers >= MIN_INLIERS) {
-        return {
-          template: { ...template, parts: alignParts(template.parts, m) },
-          source: 'aligned',
-          detail: `${m.inliers}/${m.total} labels`,
-        };
-      }
-    }
-    return { template, source: 'as-saved', detail: template.anchors?.length ? 'labels not found on this photo' : 'no saved labels' };
-  }
-  const lib = lines ? matchLibrary(lines, library) : null;
-  if (!lib) return { template: null, source: 'none', detail: '' };
-  const now = Date.now();
-  return {
-    template: {
-      version: 3,
-      id: `builtin-${lib.layout.id}`,
-      name: lib.layout.name,
-      enabled: lib.layout.enabled,
-      parts: alignParts(lib.layout.parts, lib.match),
-      variants: lib.layout.variants,
-      photoUri: null,
-      test: null,
-      builtinId: lib.layout.id,
-      createdAt: now,
-      updatedAt: now,
-    },
-    source: 'library',
-    detail: `${lib.layout.id} ${lib.match.inliers}/${lib.match.total} labels`,
-  };
-}
+export const templateForPhoto = (template: ScorebookTemplate | null, lines: TextLine[] | null, library: BuiltinLayout[] = LIBRARY) =>
+  forPhotoIn(template, lines, { id: SPORT_ID, catalog: CATALOG, library });

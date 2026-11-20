@@ -17,6 +17,7 @@ await build({
   alias: {
     '@inkstat/basketball': here('../packages/basketball/src/index.ts'),
     '@inkstat/ocr-engine': here('../packages/ocr-engine/src/index.ts'),
+    '@inkstat/track': here('../packages/track/src/index.ts'),
   },
   logLevel: 'info',
 });

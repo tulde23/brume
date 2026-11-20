@@ -11,7 +11,8 @@
     "types": ["node"],
     "paths": {
       "@inkstat/basketball": ["../packages/basketball/src/index.ts"],
-      "@inkstat/ocr-engine": ["../packages/ocr-engine/src/index.ts"]
+      "@inkstat/ocr-engine": ["../packages/ocr-engine/src/index.ts"],
+      "@inkstat/track": ["../packages/track/src/index.ts"]
     }
   },
   "include": ["src", "test", "build.mjs"]

@@ -1,4 +1,24 @@
-import { withRegionOverrides, type DocumentTemplate, type FieldSchema, type NormRect } from '@inkstat/ocr-engine';
+import {
+  isUsable as isUsableIn,
+  markedParts as markedIn,
+  newTemplate as newTemplateIn,
+  normalizeTemplate as normalizeIn,
+  specOf,
+  unmarkedParts as unmarkedIn,
+  variantOf as variantIn,
+  withRegionOverrides,
+  type Band,
+  type Catalog,
+  type DocumentTemplate,
+  type FieldSchema,
+  type NormRect,
+  type PartSpec as GenericPartSpec,
+  type PartStatus,
+  type PartVariant,
+  type Template,
+} from '@inkstat/ocr-engine';
+
+export type { Band, PartStatus, PartVariant };
 
 /**
  * A scorebook template: where each part of one kind of scorebook sits, marked
@@ -45,12 +65,6 @@ export type PartId =
   | 'possession'
   | 'teamTotals';
 
-/** A column inside the player rows: only its left edge and width; it spans the rows' height. */
-export interface Band {
-  x: number;
-  w: number;
-}
-
 export type PartGroup = 'table' | 'details' | 'score' | 'team';
 
 export const PART_GROUPS: { group: PartGroup; title: string; shape: string }[] = [
@@ -60,35 +74,9 @@ export const PART_GROUPS: { group: PartGroup; title: string; shape: string }[] =
   { group: 'team', title: 'Team areas', shape: 'Small grids' },
 ];
 
-/** How well a region reads today, from the test bench. */
-export type PartStatus = 'strong' | 'ok' | 'weak' | 'planned';
+export type PartSpec = GenericPartSpec<PartId, PartGroup>;
 
-export interface PartVariant {
-  id: string;
-  name: string;
-  sub: string;
-}
-
-export interface PartSpec {
-  id: PartId;
-  name: string;
-  group: PartGroup;
-  /** A box anywhere on the page, or a band (column) across the player rows. */
-  shape: 'box' | 'band';
-  status: PartStatus;
-  /** Ways a book can write this; picked once per template. The first is the default. */
-  variants?: PartVariant[];
-  /** Printed words near this part on most books, for suggesting a box's meaning. */
-  labels: string[];
-  /** What to do, shown on the marking step. */
-  instruction: string;
-  /** Why InkStat needs it, shown on the marking step. */
-  why: string;
-  /** Shorter reason for lists. */
-  short: string;
-}
-
-const planned = (id: PartId, name: string, group: PartGroup, shape: 'box' | 'band', labels: string[], short: string): PartSpec => ({
+const planned = (id: PartId, name: string, group: PartGroup, shape: 'box' | 'band', labels: string[], short: string): Omit<PartSpec, 'color'> => ({
   id,
   name,
   group,
@@ -100,7 +88,7 @@ const planned = (id: PartId, name: string, group: PartGroup, shape: 'box' | 'ban
   short,
 });
 
-export const PARTS: PartSpec[] = [
+const RAW_PARTS: Omit<PartSpec, 'color'>[] = [
   // ── Player table ──
   {
     id: 'rows',
@@ -279,6 +267,39 @@ export const PARTS: PartSpec[] = [
   planned('teamTotals', 'Team totals', 'team', 'box', ['totals', 'team'], 'The totals row of the summary columns.'),
 ];
 
+/** Box colors in the builder (they differ in lightness too, and every box is labelled). */
+const COLORS: Record<PartId, string> = {
+  rows: '#0F6E75',
+  names: '#2F7D4F',
+  points: '#C77700',
+  fouls: '#7A4FB5',
+  teamName: '#2563A8',
+  coach: '#0E7490',
+  location: '#4D7C0F',
+  date: '#9D174D',
+  timeouts: '#C2410C',
+  teamFouls: '#B03A78',
+  quarters: '#475569',
+  techFouls: '#B91C1C',
+  periodsPlayed: '#0F766E',
+  scoringMarks: '#0369A1',
+  fieldGoals: '#A16207',
+  threePointers: '#BE185D',
+  freeThrows: '#4338CA',
+  opponent: '#1D4ED8',
+  homeVisitor: '#57534E',
+  officials: '#6B7280',
+  gameNumber: '#78716C',
+  halfScore: '#334155',
+  finalScore: '#0F172A',
+  runningScore: '#9A3412',
+  benchTechs: '#991B1B',
+  possession: '#365314',
+  teamTotals: '#3F3F46',
+};
+
+export const PARTS: PartSpec[] = RAW_PARTS.map((p) => ({ ...p, color: COLORS[p.id] }));
+
 export const partSpec = (id: PartId): PartSpec => PARTS.find((p) => p.id === id)!;
 
 /** Game details: marked together on one wizard step. */
@@ -287,31 +308,8 @@ export const REQUIRED_PARTS: PartId[] = ['rows', 'names', 'points'];
 /** Parts a new template asks for by default (the ones that read well enough today). */
 export const DEFAULT_ENABLED: PartId[] = ['rows', 'names', 'points', 'fouls', 'teamName', 'coach', 'date', 'location', 'quarters', 'timeouts', 'teamFouls'];
 
-export interface ScorebookTemplate {
-  version: 3;
-  id: string;
-  name: string;
-  /** Parts the user chose to read, whether or not each is marked yet. */
-  enabled: PartId[];
-  /** Where each marked part is. Bands (names, points, fouls) span the rows box. */
-  parts: Partial<Record<PartId, NormRect | Band>>;
-  /** How this book writes each part that has variants (e.g. fouls: 'boxes' | 'total' | 'tally'). */
-  variants: Partial<Record<PartId, string>>;
-  /** The photo the template was made on, for editing and re-testing. */
-  photoUri: string | null;
-  /**
-   * Printed labels on the template's photo and where they were. A new photo is
-   * matched against them and the boxes are moved to fit it (optional: older
-   * templates lack them and assume photos framed the same way).
-   */
-  anchors?: { text: string; x: number; y: number }[];
-  /** Built-in layout this template started from, if any. */
-  builtinId?: string;
-  /** Last test read on that photo. */
-  test: { at: number; seconds: number; checks: number; problems: number } | null;
-  createdAt: number;
-  updatedAt: number;
-}
+/** A basketball template: the shared template format with basketball's parts. */
+export type ScorebookTemplate = Template<PartId>;
 
 /** The single layout saved before templates existed (still read for migration). */
 export interface LegacyScorebookLayout {
@@ -355,19 +353,21 @@ export const DEFAULT_PARTS: Record<PartId, NormRect | Band> = {
   teamTotals: { x: 0.04, y: 0.94, w: 0.92, h: 0.04 },
 };
 
+/** Basketball's region bank, for the shared template machinery. */
+export const CATALOG: Catalog<PartId, PartGroup> = {
+  parts: PARTS,
+  groups: PART_GROUPS,
+  rowsPart: 'rows',
+  required: REQUIRED_PARTS,
+  defaultEnabled: DEFAULT_ENABLED,
+  defaults: DEFAULT_PARTS,
+  sharedStepGroups: ['details'],
+};
+
+export const SPORT_ID = 'basketball';
+
 export function newTemplate(id: string, name: string, photoUri: string | null, now = Date.now()): ScorebookTemplate {
-  return {
-    version: 3,
-    id,
-    name,
-    enabled: [...DEFAULT_ENABLED],
-    parts: {},
-    variants: {},
-    photoUri,
-    test: null,
-    createdAt: now,
-    updatedAt: now,
-  };
+  return newTemplateIn(SPORT_ID, CATALOG, id, name, photoUri, now);
 }
 
 export function fromLegacyLayout(l: LegacyScorebookLayout, id: string, now = Date.now()): ScorebookTemplate {
@@ -377,7 +377,7 @@ export function fromLegacyLayout(l: LegacyScorebookLayout, id: string, now = Dat
   return normalizeTemplate(t);
 }
 
-const isBand = (id: PartId) => partSpec(id).shape === 'band';
+const isBand = (id: PartId) => specOf(CATALOG, id).shape === 'band';
 
 /**
  * Bring a stored template up to the current shape. v2 kept one `foulsKind`;
@@ -386,55 +386,29 @@ const isBand = (id: PartId) => partSpec(id).shape === 'band';
 export function migrateTemplate(raw: unknown): ScorebookTemplate | null {
   const t = raw as Partial<ScorebookTemplate> & { version?: number; foulsKind?: string };
   if (!t || typeof t !== 'object' || !t.id) return null;
-  if (t.version === 3) return t as ScorebookTemplate;
+  // Templates saved before sports existed are basketball's.
+  if (t.version === 3) return { ...(t as ScorebookTemplate), sport: t.sport ?? SPORT_ID };
   if (t.version === 2) {
     const { foulsKind, ...rest } = t;
-    return { ...(rest as ScorebookTemplate), version: 3, variants: foulsKind ? { fouls: foulsKind } : {} };
+    return { ...(rest as ScorebookTemplate), version: 3, sport: SPORT_ID, variants: foulsKind ? { fouls: foulsKind } : {} };
   }
   return null;
 }
 
 /** The chosen variant of a part, or its default. */
-export const variantOf = (t: Pick<ScorebookTemplate, 'variants'>, id: PartId): string | undefined =>
-  t.variants?.[id] ?? partSpec(id).variants?.[0].id;
+export const variantOf = (t: Pick<ScorebookTemplate, 'variants'>, id: PartId): string | undefined => variantIn(t, CATALOG, id);
 
 /** Keep boxes inside the page and bands inside the rows box. */
-export function normalizeTemplate(t: ScorebookTemplate): ScorebookTemplate {
-  const parts: ScorebookTemplate['parts'] = {};
-  const rowsRaw = t.parts.rows as NormRect | undefined;
-  const box = (r: NormRect, min = 0.01): NormRect => {
-    const x = clamp(r.x, 0, 1 - min);
-    const y = clamp(r.y, 0, 1 - min);
-    return { x, y, w: clamp(r.w, min, 1 - x), h: clamp(r.h, min, 1 - y) };
-  };
-  const rows = rowsRaw ? box(rowsRaw, 0.05) : undefined;
-  if (rows) parts.rows = rows;
-  for (const [id, value] of Object.entries(t.parts) as [PartId, NormRect | Band][]) {
-    if (id === 'rows' || !value) continue;
-    if (isBand(id)) {
-      const lo = rows?.x ?? 0;
-      const hi = rows ? rows.x + rows.w : 1;
-      const x = clamp(value.x, lo, hi - 0.01);
-      parts[id] = { x, w: clamp(value.w, 0.01, hi - x) };
-    } else {
-      parts[id] = box(value as NormRect);
-    }
-  }
-  return { ...t, parts };
-}
+export const normalizeTemplate = (t: ScorebookTemplate): ScorebookTemplate => normalizeIn(t, CATALOG);
 
 /** Enabled parts that still need marking, in the order the wizard asks for them. */
-export function unmarkedParts(t: ScorebookTemplate): PartId[] {
-  return PARTS.map((p) => p.id).filter((id) => t.enabled.includes(id) && !t.parts[id]);
-}
+export const unmarkedParts = (t: ScorebookTemplate): PartId[] => unmarkedIn(t, CATALOG);
 
 /** Enabled and marked: what a scan will actually read from the template. */
-export function markedParts(t: ScorebookTemplate): PartId[] {
-  return PARTS.map((p) => p.id).filter((id) => t.enabled.includes(id) && !!t.parts[id]);
-}
+export const markedParts = (t: ScorebookTemplate): PartId[] => markedIn(t, CATALOG);
 
 /** A template can read pages once the player table is fully marked. */
-export const isUsable = (t: ScorebookTemplate) => REQUIRED_PARTS.every((id) => t.enabled.includes(id) && !!t.parts[id]);
+export const isUsable = (t: ScorebookTemplate) => isUsableIn(t, CATALOG);
 
 // Region ids added by templates; assemble.ts reads them.
 export const REGION = {

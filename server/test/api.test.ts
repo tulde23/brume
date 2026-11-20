@@ -3,9 +3,8 @@ import { beforeEach, describe, it } from 'node:test';
 
 import { emptyTeam, type Game } from '@inkstat/basketball';
 
-import { createApp } from '../src/app';
-import { parseKeys } from '../src/auth';
-import { createStore, openDb } from '../src/db';
+import { parseKeys } from '../src/auth/keys';
+import { makeServer } from './helpers';
 
 // Response bodies are untyped JSON; tests assert on their shape directly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +37,7 @@ function makeGame(id: string, updatedAt: number, points = 10): Game {
 }
 
 describe('inkstat api', () => {
-  let app: ReturnType<typeof createApp>;
+  let app: Awaited<ReturnType<typeof makeServer>>['app'];
 
   const call = (method: string, path: string, body?: unknown, key = EAGLES_KEY) =>
     app.request(path, {
@@ -47,12 +46,16 @@ describe('inkstat api', () => {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-  beforeEach(() => {
-    app = createApp({
-      store: createStore(openDb(':memory:')),
-      keys: parseKeys(`eagles:${EAGLES_KEY},lakeview:${LAKEVIEW_KEY}`),
-      log: false,
-    });
+  beforeEach(async () => {
+    ({ app } = await makeServer({ keys: `eagles:${EAGLES_KEY},lakeview:${LAKEVIEW_KEY}` }));
+  });
+
+  it('shows the logo at the root', async () => {
+    const res = await app.request('/');
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /text\/html/);
+    assert.match(await res.text(), /aria-label="InkStat"/);
+    assert.equal((await app.request('/favicon.svg')).headers.get('content-type'), 'image/svg+xml');
   });
 
   it('serves health without auth', async () => {

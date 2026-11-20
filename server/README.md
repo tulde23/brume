@@ -1,6 +1,12 @@
-# InkStat sync API
+# InkStat API
 
-Optional backup and sync for the InkStat app. A single Node service (Hono) that stores games in SQLite on a mounted volume. The app works fully offline without it; when configured, it pushes local changes and pulls everything newer. Conflicts resolve last-writer-wins on each game's `updatedAt`.
+One small Node service (Hono + SQLite on a mounted volume) behind the InkStat app. The app works fully offline without it. With it:
+
+- **Accounts**: Sign in with Apple or Google (Orbit's model: no passwords, identities keyed on provider + subject, rotating refresh tokens).
+- **Groups**: a league, a school's program, or one team's scorekeepers. Members share games (the sync feed), a team list, standings and rosters. Join by invite code.
+- **Shared registry**: teams that scorekeepers build up as they go (with aliases and merges), which scorebook template each team uses, and final scores (confirmed when two scorekeepers agree).
+
+**Privacy rule:** player names never leave a group. The registry holds team names, layouts and scores only. Shared templates keep only printed scoresheet words as anchors (`src/sanitize.ts`), never a photo.
 
 The basketball types, validation and season math come from `packages/basketball`, shared with the app, and are bundled into the server at build time.
 
@@ -9,7 +15,7 @@ The basketball types, validation and season math come from `packages/basketball`
 ```sh
 cd server
 npm install
-INKSTAT_API_KEYS="eagles:$(openssl rand -hex 32)" npm run dev   # http://localhost:8787
+INKSTAT_AUTH_KEY="$(openssl rand -hex 32)" GOOGLE_CLIENT_IDS="<web client id>" npm run dev   # http://localhost:8787
 npm test
 ```
 
@@ -17,7 +23,7 @@ Or with Docker, built from the **repo root** so the shared packages are in the b
 
 ```sh
 docker build -f server/Dockerfile -t inkstat-api .
-docker run -p 8787:8787 -v inkstat-data:/data -e INKSTAT_API_KEYS="eagles:<key>" inkstat-api
+docker run -p 8787:8787 -v inkstat-data:/data -e INKSTAT_AUTH_KEY="<64 hex>" inkstat-api
 ```
 
 ## Deploy on Railway
@@ -28,9 +34,15 @@ docker run -p 8787:8787 -v inkstat-data:/data -e INKSTAT_API_KEYS="eagles:<key>"
    | Variable | Value |
    | --- | --- |
    | `RAILWAY_DOCKERFILE_PATH` | `server/Dockerfile` |
-   | `INKSTAT_API_KEYS` | `eagles:<64 hex chars>` (comma-separate more spaces) |
+   | `INKSTAT_AUTH_KEY` | `openssl rand -hex 32`. Signs access tokens; changing it signs everyone out of their current access token (refresh still works). |
+   | `INKSTAT_DATA_KEY` | `openssl rand -hex 32`. Encrypts the Apple token kept for revocation. Never change it once set. |
+   | `GOOGLE_CLIENT_IDS` | The Google **web** client id (the audience the app requests on Android and iOS). |
+   | `APPLE_CLIENT_IDS` | `com.inkstat.app` (the iOS bundle id). |
+   | `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` | The Sign in with Apple key (.p8 contents; `
+` allowed). Needed to revoke Apple tokens on account deletion (App Store 5.1.1(v)). |
+   | `INKSTAT_API_KEYS` | Optional, legacy: `eagles:<key>` shared-key spaces from the first sync build. |
 
-   Generate each key with `openssl rand -hex 32`. Each key unlocks one *space* (a team or league); spaces can't see each other's games.
+   A provider with no client ids is simply off (`503 NotConfigured`).
 3. **Settings → Volumes → Add volume**, mount path `/data`. The server finds it through `RAILWAY_VOLUME_MOUNT_PATH`.
 4. **Settings → Deploy → Healthcheck path**: `/health`.
 5. **Settings → Networking → Generate domain**. That URL plus the key go into the app under **Sync**.
@@ -40,22 +52,78 @@ docker run -p 8787:8787 -v inkstat-data:/data -e INKSTAT_API_KEYS="eagles:<key>"
 Railway notes:
 - A service with a volume runs **one replica**, and each redeploy has a few seconds of downtime. That's fine here; the app retries on the next sync.
 - The container runs as root because Railway mounts volumes as root.
-- Railway supplies `PORT`; the server listens on `::` (IPv4 and IPv6).
+- Railway supplies `PORT` (8080 on this service); the public domain's target port must match it. The server listens on `::` (IPv4 and IPv6).
+- Railway refuses a `VOLUME` line in the Dockerfile; the volume is attached in Railway at `/data`.
+- `railway up` from the repo root uploads only `server/` and `packages/` (`.railwayignore`).
 
 ## API
 
-All `/v1` routes need `Authorization: Bearer <key>`.
+Errors are `{ code, error }`; clients switch on `code`. Signed-in routes take `Authorization: Bearer <accessToken>`.
+
+### Sign-in and sessions
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/health` | No auth. `{ ok, version }` |
-| GET | `/v1/me` | Which space this key belongs to |
-| GET | `/v1/games?since=<seq>&limit=<n>` | Change feed, oldest first: `{ changes, cursor, more }`. Deletes appear as `{ deleted: true, game: null }` |
-| GET | `/v1/games/:id` | One game plus its cross-check `issues` |
-| PUT | `/v1/games/:id` | Create or update. `409` with `current` if the server has a newer `updatedAt` |
-| DELETE | `/v1/games/:id?deletedAt=<ms>` | Leaves a tombstone so other devices learn about the delete |
-| GET | `/v1/games/:id/export?format=csv\|json` | Box score export |
-| GET | `/v1/seasons` | Seasons with game counts |
-| GET | `/v1/seasons/:season/stats?team=&format=csv` | Season totals per player |
+| GET | `/health` | `{ ok, version }` |
+| POST | `/v1/auth/social` | `{ provider: "Apple"\|"Google", idToken, nonce?, displayName?, authorizationCode? }` → `{ accessToken, refreshToken, expiresAt, user }`. Apple needs the raw nonce. |
+| POST | `/v1/auth/refresh` | `{ refreshToken }` → a new pair. `401 RefreshRaced` means *the session is alive*: re-read storage and retry; **never sign out on it**. |
+| POST | `/v1/auth/logout` | `{ refreshToken }`, idempotent |
+| POST | `/v1/auth/apple/notifications` | Apple's server-to-server events; set this URL in the Apple developer portal |
+| GET / PATCH / DELETE | `/v1/me` | Account, its sign-in providers and groups; rename; delete (revokes Apple's token) |
+| POST | `/v1/me/sign-out-everywhere` | Ends every session |
+
+Access tokens last 15 minutes, refresh tokens 90 days. A stale copy within a minute of rotation is a race, not a leak; a rotation whose answer was lost is reissued for 30 minutes; any other replay ends that token's chain (other devices stay signed in).
+
+### Personal sync (signed in)
+
+Each account has its own space, so a scorekeeper's games and templates follow them across devices. Deleting the account deletes this space; games shared into a group stay with the group.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| * | `/v1/me/games…`, `/v1/me/seasons…` | The games sync API below, for the account's own games |
+| GET | `/v1/me/templates?since=<seq>` | Template change feed: `{ changes: [{ id, deleted, updatedAt, seq, data }], cursor, more }` |
+| PUT | `/v1/me/templates/:id` | A version-3 template; `409` with `current` if the server's is newer. The photo path is dropped. |
+| DELETE | `/v1/me/templates/:id?deletedAt=<ms>` | Tombstone |
+
+### Groups
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET / POST | `/v1/groups` | List mine; create `{ name, kind: league\|school\|team }` (owner sees `inviteCode`) |
+| POST | `/v1/groups/join` | `{ code }` |
+| GET / PATCH | `/v1/groups/:gid` | Group and members; rename (owner) |
+| POST | `/v1/groups/:gid/invite-code` | New code (owner) |
+| POST | `/v1/groups/:gid/members/:uid/role` | `{ role }` (owner) |
+| DELETE | `/v1/groups/:gid/members/:uid` | Leave, or remove someone (owner). The last owner can't leave others behind. |
+| GET / POST / DELETE | `/v1/groups/:gid/teams[/:tid]` | The group's teams |
+| GET | `/v1/groups/:gid/standings?season=` | W–L from results between the group's teams |
+| GET / PUT | `/v1/groups/:gid/rosters/:tid?season=` | `{ players: [{ number, name }] }`, members only |
+| * | `/v1/groups/:gid/games…`, `/v1/groups/:gid/seasons…` | The sync API below, for the group's games |
+
+### Registry
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/v1/teams?sport=&q=&level=&gender=&state=` | Search names and aliases, best first |
+| POST | `/v1/teams` | `{ sport, name, school?, town?, state?, level, gender }` → the existing team (200) or a new one (201) with `similar` near-misses |
+| GET | `/v1/teams/:id` | Team (merged ids follow to the survivor) and its templates, most used first |
+| POST | `/v1/teams/:id/aliases` | `{ alias }` |
+| POST | `/v1/teams/:id/merge` | `{ intoId }`: a vote; two different scorekeepers merge it |
+| GET | `/v1/teams/:id/results?season=` | Record and results |
+| POST | `/v1/teams/:id/templates` | `{ templateId }`: "I read this team's book with this" |
+| POST / GET | `/v1/templates[/:id]` | A layout (parts, variants, anchors); unknown parts and non-vocabulary anchors are dropped |
+| POST | `/v1/results` | `{ sport, date, homeId, awayId, homeScore, awayScore, periods? }` → `reported`, `confirmed` (2 agree) or `disputed` |
+| GET / DELETE | `/v1/results/:id` | Read; withdraw my report |
+
+### Games sync (per group, or a legacy key space at `/v1/games`)
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `…/games?since=<seq>&limit=<n>` | Change feed, oldest first: `{ changes, cursor, more }`. Deletes appear as `{ deleted: true, game: null }` |
+| GET | `…/games/:id` | One game plus its cross-check `issues` |
+| PUT | `…/games/:id` | Create or update. `409` with `current` if the server has a newer `updatedAt` |
+| DELETE | `…/games/:id?deletedAt=<ms>` | Leaves a tombstone so other devices learn about the delete |
+| GET | `…/games/:id/export?format=csv\|json` | Box score export |
+| GET | `…/seasons`, `…/seasons/:season/stats?team=&format=csv` | Seasons; season totals per player |
 
 Page photos never leave the phone; the server strips their file paths on upload.

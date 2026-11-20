@@ -1,0 +1,12 @@
+{
+  "name": "@inkstat/track",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Track and field domain: region bank for meet sheets (heat sheets, results, field event cards), reading and cross-checks.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@inkstat/ocr-engine": "*"
+  }
+}

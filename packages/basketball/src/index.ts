@@ -34,4 +34,25 @@ export {
 export { templateChecks, type PartCheck } from './templateCheck';
 export { placeParts, suggestParts, type Placement } from './autoPlace';
 export { scoreReading, type BenchScore, type BenchTruth } from './bench';
+export { CATALOG, SPORT_ID } from "./scorebook";
 export { LIBRARY, alignParts, anchorsForTemplate, matchLibrary, templateForPhoto, type BuiltinLayout, type LibraryMatch, type TemplateSource } from './library';
+
+import type { SportModule } from '@inkstat/ocr-engine';
+import { readPage as readBasketballPage } from './assemble';
+import { placeParts as placeBasketball } from './autoPlace';
+import { LIBRARY as BASKETBALL_LIBRARY } from './library';
+import { CATALOG as BASKETBALL_CATALOG, applyTemplate as applyBasketball, type PartGroup as BasketballGroup, type PartId as BasketballPart } from './scorebook';
+import { SCOREBOOK_PAGE_TEMPLATE as BASKETBALL_PAGE } from './template';
+import { templateChecks as basketballChecks } from './templateCheck';
+
+/** Basketball, plugged into the shared template machinery. */
+export const BASKETBALL: SportModule<BasketballPart, BasketballGroup> = {
+  id: 'basketball',
+  name: 'Basketball',
+  pageNoun: 'scorebook page',
+  catalog: BASKETBALL_CATALOG,
+  library: BASKETBALL_LIBRARY,
+  placeParts: placeBasketball,
+  documentFor: (t) => applyBasketball(BASKETBALL_PAGE, t),
+  checks: (t, run) => basketballChecks(t, readBasketballPage(run)),
+};

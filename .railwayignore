@@ -1,0 +1,10 @@
+# `railway up` uploads only what the API image builds from (server/Dockerfile).
+/*
+!/server
+!/packages
+!/.railwayignore
+server/node_modules
+server/dist
+server/data
+**/node_modules
+**/__tests__/fixtures
