@@ -10,8 +10,8 @@
     "esModuleInterop": true,
     "types": ["node"],
     "paths": {
-      "@brume/basketball": ["../packages/basketball/src/index.ts"],
-      "@brume/ocr-engine": ["../packages/ocr-engine/src/index.ts"]
+      "@inkstat/basketball": ["../packages/basketball/src/index.ts"],
+      "@inkstat/ocr-engine": ["../packages/ocr-engine/src/index.ts"]
     }
   },
   "include": ["src", "test", "build.mjs"]

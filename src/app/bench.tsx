@@ -10,7 +10,7 @@ import {
   type BenchScore,
   type BenchTruth,
   type PartId,
-} from '@brume/basketball';
+} from '@inkstat/basketball';
 import { Directory, File, Paths } from 'expo-file-system';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -69,7 +69,7 @@ function loadSamples(): Sample[] {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-const KEEP_AWAKE_TAG = 'brume-bench';
+const KEEP_AWAKE_TAG = 'inkstat-bench';
 
 export default function Bench() {
   const db = useSQLiteContext();
@@ -153,7 +153,7 @@ export default function Bench() {
     }
   };
 
-  // Driven from a computer: brume://bench?run=template&only=stars,nba-nets-1984
+  // Driven from a computer: inkstat://bench?run=template&only=stars,nba-nets-1984
   // (adb shell am start -d ...); results are read from the Metro log.
   // `n` is a nonce so the same run can be requested again.
   const { run, only, n } = useLocalSearchParams<{ run?: Mode; only?: string; n?: string }>();

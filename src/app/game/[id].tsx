@@ -24,7 +24,7 @@ import {
   type PlayerLine,
   type Side,
   type TeamSheet,
-} from '@brume/basketball';
+} from '@inkstat/basketball';
 import { deleteGameImages, shareText } from '@/lib/files';
 import { Button, Card, T } from '@/ui/components';
 import { PhotoViewer, type Photo } from '@/ui/PhotoViewer';
@@ -52,7 +52,7 @@ const blankPlayer = (): PlayerLine => ({
   readNotes: [],
 });
 
-/** What Brume read from, in order: the whole page, then each crop it sent to the model. */
+/** What InkStat read from, in order: the whole page, then each crop it sent to the model. */
 function teamPhotos(team: TeamSheet): Photo[] {
   const label = (regionId: string) => {
     if (regionId === 'summary') return 'Header and score by period';

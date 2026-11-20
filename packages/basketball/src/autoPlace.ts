@@ -1,4 +1,4 @@
-import type { NormRect, TextLine, TextWord } from '@brume/ocr-engine';
+import type { NormRect, TextLine, TextWord } from '@inkstat/ocr-engine';
 
 import { PARTS, type Band, type PartId, type PartSpec } from './scorebook';
 

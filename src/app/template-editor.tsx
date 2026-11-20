@@ -25,8 +25,8 @@ import {
   type LibraryMatch,
   type Placement,
   type ScorebookTemplate,
-} from '@brume/basketball';
-import type { NormRect, TextLine } from '@brume/ocr-engine';
+} from '@inkstat/basketball';
+import type { NormRect, TextLine } from '@inkstat/ocr-engine';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -506,7 +506,7 @@ function RegionChooser({
 function WhyCard({ text, c }: { text: string; c: Colors }) {
   return (
     <View style={[styles.why, { backgroundColor: c.accent + '1F' }]}>
-      <T style={{ fontSize: 13, fontFamily: fonts.bodyBold, color: c.accent }}>Why Brume needs this</T>
+      <T style={{ fontSize: 13, fontFamily: fonts.bodyBold, color: c.accent }}>Why InkStat needs this</T>
       <T style={{ fontSize: 14, lineHeight: 20 }}>{text}</T>
     </View>
   );
@@ -552,7 +552,7 @@ function PhotoPhase({
     <>
       <ScrollView contentContainerStyle={[base.content, { gap: space.md }]} keyboardShouldPersistTaps="handled">
         <T style={base.h1}>Start with one clear photo</T>
-        <T muted>Use a page that is already filled in. Brume tests the template on it at the end, so you see right away whether it works.</T>
+        <T muted>Use a page that is already filled in. InkStat tests the template on it at the end, so you see right away whether it works.</T>
         {tpl.photoUri && aspect ? (
           <Image source={{ uri: tpl.photoUri }} style={{ width, height: width / aspect, borderRadius: 12 }} resizeMode="contain" />
         ) : (
@@ -619,8 +619,8 @@ function PickPhase({
   return (
     <>
       <ScrollView contentContainerStyle={[base.content, { gap: space.sm }]}>
-        <T style={base.h1}>What should Brume read?</T>
-        <T muted>{'Turn off anything your book doesn\u2019t have. Each part adds about a second to every scan. The label shows how well Brume reads it today.'}</T>
+        <T style={base.h1}>What should InkStat read?</T>
+        <T muted>{'Turn off anything your book doesn\u2019t have. Each part adds about a second to every scan. The label shows how well InkStat reads it today.'}</T>
         {PART_GROUPS.map((g) => {
           const ready = PARTS.filter((p) => p.group === g.group && p.status !== 'planned');
           const later = PARTS.filter((p) => p.group === g.group && p.status === 'planned');
@@ -732,7 +732,7 @@ function MarkPhase({
     return 'Review';
   })();
 
-  // What Brume will see for the player table: its columns joined, top few rows.
+  // What InkStat will see for the player table: its columns joined, top few rows.
   const previewBands = (['names', 'fouls', 'points'] as PartId[])
     .filter((p) => tpl.enabled.includes(p) && tpl.parts[p])
     .map((p) => fullRect(tpl, p)!)
@@ -791,7 +791,7 @@ function MarkPhase({
           <T muted style={base.small}>Drag the box or its corners. Pinch or double-tap to zoom, then drag the page to look around.</T>
           {isBand(part) && previewBands.length > 1 && (
             <View style={{ gap: 6 }}>
-              <T style={{ fontSize: 13, fontFamily: fonts.bodyBold }}>What Brume will see</T>
+              <T style={{ fontSize: 13, fontFamily: fonts.bodyBold }}>What InkStat will see</T>
               <View style={[styles.preview, { borderColor: c.border }]}>
                 {previewBands.map((r, i) => (
                   <View key={i} style={{ flexDirection: 'row' }}>
@@ -804,7 +804,7 @@ function MarkPhase({
           )}
           {!isBand(part) && rect && part !== 'rows' && (
             <View style={{ gap: 6 }}>
-              <T style={{ fontSize: 13, fontFamily: fonts.bodyBold }}>What Brume will see</T>
+              <T style={{ fontSize: 13, fontFamily: fonts.bodyBold }}>What InkStat will see</T>
               <View style={[styles.preview, { borderColor: c.border, alignSelf: 'flex-start' }]}>
                 <PhotoCrop uri={uri} aspect={aspect} rect={rect} height={Math.min(72, 72)} />
               </View>
@@ -891,14 +891,14 @@ function ReviewPhase({
               <T style={{ fontFamily: fonts.bodyBold, color: c.accent }}>
                 {autoPlaced.recognised
                   ? `Recognised: ${autoPlaced.recognised}`
-                  : `Brume placed ${autoPlaced.parts.length} of ${tpl.enabled.length} parts from the printed labels`}
+                  : `InkStat placed ${autoPlaced.parts.length} of ${tpl.enabled.length} parts from the printed labels`}
               </T>
               <T style={{ fontSize: 14, lineHeight: 20 }}>
                 {autoPlaced.recognised
                   ? 'Every box comes from this book\u2019s built-in template, lined up to your photo. Check them, then run the test read.'
                   : autoPlaced.parts.length < tpl.enabled.length
                     ? `Check every box, especially ${tpl.enabled.filter((p) => !autoPlaced.parts.includes(p)).map((p) => partSpec(p).name.toLowerCase()).join(', ')}: those are only a guess. Then run the test read.`
-                    : 'Check every box, then run the test read to see what Brume reads with them.'}
+                    : 'Check every box, then run the test read to see what InkStat reads with them.'}
               </T>
             </Card>
           </View>
@@ -1040,7 +1040,7 @@ function ReviewPhase({
 
 // ── Phase 4b: test read ─────────────────────────────────────────────────────
 
-const KEEP_AWAKE_TAG = 'brume-template-test';
+const KEEP_AWAKE_TAG = 'inkstat-template-test';
 
 function TestPhase({
   tpl,
@@ -1144,7 +1144,7 @@ function TestPhase({
   return (
     <>
       <ScrollView contentContainerStyle={[base.content, { gap: space.md }]}>
-        <T style={base.h1}>{'Here’s what Brume read'}</T>
+        <T style={base.h1}>{'Here’s what InkStat read'}</T>
         <View style={[base.row, { gap: 8, flexWrap: 'wrap' }]}>
           <T style={[styles.pill, { backgroundColor: c.okBg, color: c.ok }]}>{`${shown.length - problems.length} look right`}</T>
           {problems.length > 0 && <T style={[styles.pill, { backgroundColor: c.warnBg, color: c.warn }]}>{`${problems.length} to check`}</T>}
@@ -1165,7 +1165,7 @@ function TestPhase({
                     setRemoved((r) => [...r, k.part]);
                   }}
                   accessibilityRole="button"
-                  accessibilityHint="Brume stops reading this part on this scorebook"
+                  accessibilityHint="InkStat stops reading this part on this scorebook"
                   style={{ minHeight: 40, justifyContent: 'center' }}>
                   <T style={{ color: c.error, fontFamily: fonts.bodySemiBold }}>Remove this part</T>
                 </Pressable>

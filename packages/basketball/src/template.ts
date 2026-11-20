@@ -1,4 +1,4 @@
-import type { DocumentTemplate, FieldSchema } from '@brume/ocr-engine';
+import type { DocumentTemplate, FieldSchema } from '@inkstat/ocr-engine';
 
 /**
  * Reads ONE team's page of a standard US basketball scorebook: a header with

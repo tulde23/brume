@@ -1,4 +1,4 @@
-import type { ExtractionRun, RegionResult } from '@brume/ocr-engine';
+import type { ExtractionRun, RegionResult } from '@inkstat/ocr-engine';
 
 import {
   SCOREBOOK_PAGE_TEMPLATE,

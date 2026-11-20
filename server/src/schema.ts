@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { Game } from '@brume/basketball';
+import type { Game } from '@inkstat/basketball';
 
 const stat = z.number().int().min(0).max(1000).nullable();
 const text = (max: number) => z.string().max(max).nullable();

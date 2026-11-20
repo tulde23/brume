@@ -1,4 +1,4 @@
-import { isUsable, markedParts, type ScorebookTemplate } from '@brume/basketball';
+import { isUsable, markedParts, type ScorebookTemplate } from '@inkstat/basketball';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
@@ -11,7 +11,7 @@ import { base, fonts, space, useColors } from '@/ui/theme';
 
 const HOW = [
   ['1', 'Photo', 'One clear, filled-in page'],
-  ['2', 'Pick', 'What Brume should read'],
+  ['2', 'Pick', 'What InkStat should read'],
   ['3', 'Mark', 'Draw a box on each part'],
   ['4', 'Check', 'Test read, then save'],
 ];
@@ -61,7 +61,7 @@ export default function Templates() {
 
   return (
     <ScrollView style={[base.screen, { backgroundColor: c.bg }]} contentContainerStyle={[base.content, { gap: space.md }]}>
-      <T muted>A template shows Brume where each part of your scorebook is. Make one for each kind of book you use. It works for every page from that book.</T>
+      <T muted>A template shows InkStat where each part of your scorebook is. Make one for each kind of book you use. It works for every page from that book.</T>
 
       {list.map((t) => {
         const active = t.id === activeId;

@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { READ_IN_PROGRESS_KEY, clearSetting, deleteGame, getSetting, listGames } from '@/db';
-import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@brume/basketball';
+import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@inkstat/basketball';
 import { activeModel, type ActiveModel } from '@/engine/host';
 import { Badge, Button, Card, StatusDot, T } from '@/ui/components';
 import { deleteGameImages } from '@/lib/files';
@@ -100,7 +100,7 @@ export default function Home() {
               <Card style={{ backgroundColor: c.errorBg, borderColor: c.error }}>
                 <T style={[base.h2, { color: c.error }]}>Reading was interrupted</T>
                 <T>
-                  Android closed Brume while it was reading a page, almost always because the phone ran
+                  Android closed InkStat while it was reading a page, almost always because the phone ran
                   low on memory. Close other apps and try again.
                   {model?.approxRamBytes ? ` ${model.name} needs about ${(model.approxRamBytes / 1e9).toFixed(1)} GB free.` : ''}
                 </T>
@@ -119,7 +119,7 @@ export default function Home() {
               <Card style={{ backgroundColor: c.warnBg, borderColor: c.warnLine }}>
                 <T style={base.h2}>Download the reading model</T>
                 <T>
-                  Brume reads scoresheets entirely on this phone. It needs a one-time download of {model.name}{' '}
+                  InkStat reads scoresheets entirely on this phone. It needs a one-time download of {model.name}{' '}
                   first. Use Wi-Fi.
                 </T>
                 <Button title="Set up model" onPress={() => router.push('/models')} />

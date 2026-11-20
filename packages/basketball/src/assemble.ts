@@ -1,4 +1,4 @@
-import { resultsFor, type ExtractionRun } from '@brume/ocr-engine';
+import { resultsFor, type ExtractionRun } from '@inkstat/ocr-engine';
 
 import { REGION, detailRegion } from './scorebook';
 import { emptyTeam, type PlayerLine, type TeamSheet } from './types';

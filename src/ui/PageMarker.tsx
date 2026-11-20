@@ -1,4 +1,4 @@
-import type { NormRect } from '@brume/ocr-engine';
+import type { NormRect } from '@inkstat/ocr-engine';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
@@ -348,7 +348,7 @@ export function PageMarker({
   );
 }
 
-/** Part of the photo, shown at a fixed height: what Brume will be shown for a box. */
+/** Part of the photo, shown at a fixed height: what InkStat will be shown for a box. */
 export function PhotoCrop({ uri, aspect, rect, height }: { uri: string; aspect: number; rect: NormRect; height: number }) {
   const m = height / Math.max(0.001, rect.h);
   return (

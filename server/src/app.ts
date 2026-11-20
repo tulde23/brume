@@ -1,4 +1,4 @@
-import { gameToCsv, gameToJson, seasonToCsv, seasonTotals, validateGame } from '@brume/basketball';
+import { gameToCsv, gameToJson, seasonToCsv, seasonTotals, validateGame } from '@inkstat/basketball';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { logger } from 'hono/logger';

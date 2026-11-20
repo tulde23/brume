@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the Brume test bench on a connected phone and print its results.
+# Run the InkStat test bench on a connected phone and print its results.
 #
 #   scripts/run-bench.sh <mode> [ids,comma,separated] [metro-log]
 #
@@ -15,14 +15,14 @@ before=$(grep -c "\[bench-done\]" "$LOG" || true)
 $ADB shell svc power stayon usb
 $ADB shell input keyevent KEYCODE_WAKEUP
 $ADB reverse tcp:8081 tcp:8081 >/dev/null
-base="brume://bench?run=$MODE"
+base="inkstat://bench?run=$MODE"
 [ -n "$ONLY" ] && base="$base&only=$ONLY"
 # n is a nonce: the app ignores a link it has already run.
 url="$base&n=$(date +%s)"
 starts=$(grep -c "\[bench-start\]" "$LOG" || true)
 # The app may still be loading (e.g. just installed): resend the link until the run starts.
 for attempt in 1 2 3 4 5 6; do
-  $ADB shell "am start -a android.intent.action.VIEW -d '$url' com.brume.app" >/dev/null
+  $ADB shell "am start -a android.intent.action.VIEW -d '$url' com.inkstat.app" >/dev/null
   for _ in $(seq 1 10); do
     [ "$(grep -c "\[bench-start\]" "$LOG" || true)" -gt "$starts" ] && break 2
     sleep 2

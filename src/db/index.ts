@@ -1,8 +1,8 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { fromLegacyLayout, migrateTemplate, type Game, type LegacyScorebookLayout, type ScorebookTemplate } from '@brume/basketball';
+import { fromLegacyLayout, migrateTemplate, type Game, type LegacyScorebookLayout, type ScorebookTemplate } from '@inkstat/basketball';
 
-export const DB_NAME = 'brume.db';
+export const DB_NAME = 'inkstat.db';
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
   await db.execAsync(`

@@ -11,7 +11,7 @@ export interface PartCheck {
 }
 
 /**
- * After a test read, one line per marked part: what Brume got and whether it
+ * After a test read, one line per marked part: what InkStat got and whether it
  * looks right. "Looks right" means read at all, and where there is a cross-check
  * (points vs the final score, quarters vs the final), that it passes.
  */

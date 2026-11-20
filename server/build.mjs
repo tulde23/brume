@@ -1,4 +1,4 @@
-// Bundle the server and the shared @brume packages into one file.
+// Bundle the server and the shared @inkstat packages into one file.
 // better-sqlite3 stays external because it ships a native binary.
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +15,8 @@ await build({
   sourcemap: true,
   external: ['better-sqlite3'],
   alias: {
-    '@brume/basketball': here('../packages/basketball/src/index.ts'),
-    '@brume/ocr-engine': here('../packages/ocr-engine/src/index.ts'),
+    '@inkstat/basketball': here('../packages/basketball/src/index.ts'),
+    '@inkstat/ocr-engine': here('../packages/ocr-engine/src/index.ts'),
   },
   logLevel: 'info',
 });

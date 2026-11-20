@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
-import type { ScorebookTemplate } from '@brume/basketball';
+import type { ScorebookTemplate } from '@inkstat/basketball';
 
 export const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 

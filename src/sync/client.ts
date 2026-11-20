@@ -1,4 +1,4 @@
-import type { Game } from '@brume/basketball';
+import type { Game } from '@inkstat/basketball';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import {
@@ -13,7 +13,7 @@ import {
 } from '@/db';
 
 /**
- * Optional sync with the Brume API. The phone stays the source of truth while
+ * Optional sync with the InkStat API. The phone stays the source of truth while
  * offline; a sync pushes local changes, then pulls everything newer from the
  * server. Conflicts are last-writer-wins on updatedAt, decided by the server.
  */

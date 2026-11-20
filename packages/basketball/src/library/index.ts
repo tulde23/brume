@@ -1,4 +1,4 @@
-import { anchorsFrom, mapRect, matchLayout, type Anchor, type LayoutMatch, type NormRect, type TextLine } from '@brume/ocr-engine';
+import { anchorsFrom, mapRect, matchLayout, type Anchor, type LayoutMatch, type NormRect, type TextLine } from '@inkstat/ocr-engine';
 
 import { partSpec, type Band, type PartId, type ScorebookTemplate } from '../scorebook';
 import championAnchors from './nfhs-champion.anchors.json';

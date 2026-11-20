@@ -1,4 +1,4 @@
-import type { DocumentTemplate, ExtractionProgress, NormRect } from '@brume/ocr-engine';
+import type { DocumentTemplate, ExtractionProgress, NormRect } from '@inkstat/ocr-engine';
 import { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Image, StyleSheet, View } from 'react-native';
 
@@ -21,7 +21,7 @@ const BRACKET = 26;
 const TRAIL = 10; // layers in the scan line's fading tail
 
 /**
- * The page being read, with the part Brume is reading highlighted and a scan
+ * The page being read, with the part InkStat is reading highlighted and a scan
  * line sweeping it, framed by the Viewfinder corner brackets. Motion is
  * replaced by a still highlight when the phone asks for reduced motion.
  */

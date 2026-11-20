@@ -1,4 +1,4 @@
-import { withRegionOverrides, type DocumentTemplate, type FieldSchema, type NormRect } from '@brume/ocr-engine';
+import { withRegionOverrides, type DocumentTemplate, type FieldSchema, type NormRect } from '@inkstat/ocr-engine';
 
 /**
  * A scorebook template: where each part of one kind of scorebook sits, marked
@@ -82,7 +82,7 @@ export interface PartSpec {
   labels: string[];
   /** What to do, shown on the marking step. */
   instruction: string;
-  /** Why Brume needs it, shown on the marking step. */
+  /** Why InkStat needs it, shown on the marking step. */
   why: string;
   /** Shorter reason for lists. */
   short: string;
@@ -96,7 +96,7 @@ const planned = (id: PartId, name: string, group: PartGroup, shape: 'box' | 'ban
   status: 'planned',
   labels,
   instruction: shape === 'band' ? `Drag across the ${name.toLowerCase()} column.` : `Box the ${name.toLowerCase()} area.`,
-  why: `${short} Brume keeps this box with the template; reading it is coming soon.`,
+  why: `${short} InkStat keeps this box with the template; reading it is coming soon.`,
   short,
 });
 
@@ -110,8 +110,8 @@ export const PARTS: PartSpec[] = [
     status: 'strong',
     labels: ['player', 'players', 'name'],
     instruction: 'Draw a box around every player row, from the first name to the last empty row. Leave out the column headings.',
-    why: 'Brume only looks for players inside this box. The running-score grid is full of numbers that look like jersey numbers, so keeping it out stops fake players.',
-    short: 'Keeps Brume out of the headers and running-score grid.',
+    why: 'InkStat only looks for players inside this box. The running-score grid is full of numbers that look like jersey numbers, so keeping it out stops fake players.',
+    short: 'Keeps InkStat out of the headers and running-score grid.',
   },
   {
     id: 'names',
@@ -121,7 +121,7 @@ export const PARTS: PartSpec[] = [
     status: 'strong',
     labels: ['player', 'name', 'no', 'pos', 'number'],
     instruction: 'Drag across the player name and jersey number columns.',
-    why: 'Tells Brume which player each row belongs to, and matches rows between reads by jersey number.',
+    why: 'Tells InkStat which player each row belongs to, and matches rows between reads by jersey number.',
     short: 'Which player each row belongs to.',
   },
   {
@@ -132,7 +132,7 @@ export const PARTS: PartSpec[] = [
     status: 'strong',
     labels: ['tp', 'pts', 'points', 'tot', 'total', 'te'],
     instruction: 'Drag across the TP or PTS column only. The band already runs the height of your player rows.',
-    why: 'Next to the total are FG, FT and foul marks. If they are in the band, Brume cannot tell which number is the total.',
+    why: 'Next to the total are FG, FT and foul marks. If they are in the band, InkStat cannot tell which number is the total.',
     short: 'Read from just this column, points stay with the right player.',
   },
   {
@@ -148,7 +148,7 @@ export const PARTS: PartSpec[] = [
     ],
     labels: ['fouls', 'foul', 'personal', 'pf', 'f'],
     instruction: 'Drag across the foul boxes, or the F / PF total column if your book has one.',
-    why: 'Brume reads each player’s fouls and flags anyone at 5 or more. Counting crossed-off boxes isn’t reliable yet; a written total is.',
+    why: 'InkStat reads each player’s fouls and flags anyone at 5 or more. Counting crossed-off boxes isn’t reliable yet; a written total is.',
     short: 'Each player’s fouls.',
   },
   planned('techFouls', 'Technical fouls', 'table', 'band', ['t1', 't2', 'tech'], 'T1 / T2 boxes per player.'),
@@ -166,7 +166,7 @@ export const PARTS: PartSpec[] = [
     status: 'strong',
     labels: ['team'],
     instruction: 'Box the handwritten team name, not the printed label.',
-    why: 'Read from the whole page, scribbles near the name (like possession arrows) get taken for it. A small box shows Brume only the name, enlarged.',
+    why: 'Read from the whole page, scribbles near the name (like possession arrows) get taken for it. A small box shows InkStat only the name, enlarged.',
     short: 'Read up close, so nearby scribbles aren’t taken for the name.',
   },
   {
@@ -225,7 +225,7 @@ export const PARTS: PartSpec[] = [
     status: 'ok',
     labels: ['quarters', 'qtr', 'score', 'periods', 'final'],
     instruction: 'Box the score-by-period boxes, including overtime and the final score.',
-    why: 'Brume checks that player points add up to the final score, and converts running totals to points per period.',
+    why: 'InkStat checks that player points add up to the final score, and converts running totals to points per period.',
     short: 'Checks player points add up to the final.',
   },
   {
@@ -247,7 +247,7 @@ export const PARTS: PartSpec[] = [
     status: 'ok',
     labels: ['final', 'total', 'totals'],
     instruction: 'Box the final score.',
-    why: 'Brume checks that player points add up to it.',
+    why: 'InkStat checks that player points add up to it.',
     short: 'Checks player points.',
   },
   // ── Team areas ──
@@ -259,7 +259,7 @@ export const PARTS: PartSpec[] = [
     status: 'weak',
     labels: ['team', 'fouls'],
     instruction: 'Box the team fouls area: the numbered boxes crossed off as fouls happen.',
-    why: 'Brume counts team fouls for each half or quarter, for bonus tracking. Counting marks isn’t reliable yet.',
+    why: 'InkStat counts team fouls for each half or quarter, for bonus tracking. Counting marks isn’t reliable yet.',
     short: 'Team fouls per half or quarter.',
   },
   {
@@ -270,7 +270,7 @@ export const PARTS: PartSpec[] = [
     status: 'weak',
     labels: ['timeouts', 'time', 'outs'],
     instruction: 'Box the timeouts area, where taken timeouts are written or crossed off.',
-    why: 'Brume counts how many timeouts were used. Counting marks isn’t reliable yet.',
+    why: 'InkStat counts how many timeouts were used. Counting marks isn’t reliable yet.',
     short: 'How many timeouts were used.',
   },
   planned('runningScore', 'Running score', 'team', 'box', ['running', 'score'], 'The 1–120 tally of baskets.'),

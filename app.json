@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "Brume",
-    "slug": "brume",
-    "scheme": "brume",
+    "name": "InkStat",
+    "slug": "inkstat",
+    "scheme": "inkstat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.brume.app"
+      "bundleIdentifier": "com.inkstat.app"
     },
     "android": {
-      "package": "com.brume.app",
+      "package": "com.inkstat.app",
       "adaptiveIcon": {
         "backgroundColor": "#0F6E75",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -28,8 +28,8 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Brume uses the camera to photograph paper scoresheets.",
-          "photosPermission": "Brume reads scoresheet photos you choose from your library."
+          "cameraPermission": "InkStat uses the camera to photograph paper scoresheets.",
+          "photosPermission": "InkStat reads scoresheet photos you choose from your library."
         }
       ],
       [

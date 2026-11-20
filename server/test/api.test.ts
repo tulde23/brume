@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
-import { emptyTeam, type Game } from '@brume/basketball';
+import { emptyTeam, type Game } from '@inkstat/basketball';
 
 import { createApp } from '../src/app';
 import { parseKeys } from '../src/auth';
@@ -24,7 +24,7 @@ function makeGame(id: string, updatedAt: number, points = 10): Game {
       ...emptyTeam(),
       name: 'Eagles',
       totalPoints: points,
-      pageUri: 'file:///data/user/0/com.brume.app/files/pages/x/home.jpg',
+      pageUri: 'file:///data/user/0/com.inkstat.app/files/pages/x/home.jpg',
       crops: [{ regionId: 'summary', uri: 'file:///crop.png' }],
       players: [
         { number: '23', name: 'Rivera', fouls: 1, fg2: 5, fg3: 0, ftMade: 0, ftAttempted: 0, points, readNotes: [] },
@@ -37,7 +37,7 @@ function makeGame(id: string, updatedAt: number, points = 10): Game {
   };
 }
 
-describe('brume api', () => {
+describe('inkstat api', () => {
   let app: ReturnType<typeof createApp>;
 
   const call = (method: string, path: string, body?: unknown, key = EAGLES_KEY) =>

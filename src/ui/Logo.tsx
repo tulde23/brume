@@ -24,9 +24,9 @@ export function LogoMark({ size = 28 }: { size?: number }) {
 export function Logo({ size = 28 }: { size?: number }) {
   const c = useColors();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: size * 0.3 }} accessibilityRole="header" accessibilityLabel="Brume">
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: size * 0.3 }} accessibilityRole="header" accessibilityLabel="InkStat">
       <LogoMark size={size} />
-      <Text style={{ fontFamily: fonts.heading, fontSize: size * 0.86, color: c.text, letterSpacing: -0.3 }}>brume</Text>
+      <Text style={{ fontFamily: fonts.heading, fontSize: size * 0.86, color: c.text, letterSpacing: -0.3 }}>InkStat</Text>
     </View>
   );
 }

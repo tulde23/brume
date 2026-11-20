@@ -1,5 +1,5 @@
-import { MODEL_CATALOG, type ModelSpec } from '@brume/ocr-engine';
-import { deleteModel, downloadModel, modelStatus, type ModelStatus } from '@brume/ocr-engine/native';
+import { MODEL_CATALOG, type ModelSpec } from '@inkstat/ocr-engine';
+import { deleteModel, downloadModel, modelStatus, type ModelStatus } from '@inkstat/ocr-engine/native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
@@ -65,7 +65,7 @@ const NANO_STATUS_TEXT: Record<NanoStatus, string> = {
 };
 
 /**
- * Gemini Nano is installed and updated by Android (AICore), not by Brume. On
+ * Gemini Nano is installed and updated by Android (AICore), not by InkStat. On
  * Pixel 10 it runs on the Tensor TPU, far faster than the downloadable models.
  */
 function NanoCard({ active, onUse }: { active: boolean; onUse: () => void }) {
@@ -107,7 +107,7 @@ function NanoCard({ active, onUse }: { active: boolean; onUse: () => void }) {
       </View>
       <T muted>
         Built into Android and runs on this phone&apos;s AI chip, so it is much faster where supported. Managed by
-        Android; Brume only needs Brume to stay open while reading.
+        Android; InkStat only needs InkStat to stay open while reading.
       </T>
       {progress && (
         <View style={{ gap: space.xs }}>

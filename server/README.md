@@ -1,6 +1,6 @@
-# Brume sync API
+# InkStat sync API
 
-Optional backup and sync for the Brume app. A single Node service (Hono) that stores games in SQLite on a mounted volume. The app works fully offline without it; when configured, it pushes local changes and pulls everything newer. Conflicts resolve last-writer-wins on each game's `updatedAt`.
+Optional backup and sync for the InkStat app. A single Node service (Hono) that stores games in SQLite on a mounted volume. The app works fully offline without it; when configured, it pushes local changes and pulls everything newer. Conflicts resolve last-writer-wins on each game's `updatedAt`.
 
 The basketball types, validation and season math come from `packages/basketball`, shared with the app, and are bundled into the server at build time.
 
@@ -9,15 +9,15 @@ The basketball types, validation and season math come from `packages/basketball`
 ```sh
 cd server
 npm install
-BRUME_API_KEYS="eagles:$(openssl rand -hex 32)" npm run dev   # http://localhost:8787
+INKSTAT_API_KEYS="eagles:$(openssl rand -hex 32)" npm run dev   # http://localhost:8787
 npm test
 ```
 
 Or with Docker, built from the **repo root** so the shared packages are in the build context:
 
 ```sh
-docker build -f server/Dockerfile -t brume-api .
-docker run -p 8787:8787 -v brume-data:/data -e BRUME_API_KEYS="eagles:<key>" brume-api
+docker build -f server/Dockerfile -t inkstat-api .
+docker run -p 8787:8787 -v inkstat-data:/data -e INKSTAT_API_KEYS="eagles:<key>" inkstat-api
 ```
 
 ## Deploy on Railway
@@ -28,7 +28,7 @@ docker run -p 8787:8787 -v brume-data:/data -e BRUME_API_KEYS="eagles:<key>" bru
    | Variable | Value |
    | --- | --- |
    | `RAILWAY_DOCKERFILE_PATH` | `server/Dockerfile` |
-   | `BRUME_API_KEYS` | `eagles:<64 hex chars>` (comma-separate more spaces) |
+   | `INKSTAT_API_KEYS` | `eagles:<64 hex chars>` (comma-separate more spaces) |
 
    Generate each key with `openssl rand -hex 32`. Each key unlocks one *space* (a team or league); spaces can't see each other's games.
 3. **Settings → Volumes → Add volume**, mount path `/data`. The server finds it through `RAILWAY_VOLUME_MOUNT_PATH`.

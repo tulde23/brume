@@ -1,4 +1,4 @@
-import type { PartId } from '@brume/basketball';
+import type { PartId } from '@inkstat/basketball';
 
 /** One color per template part, as on the approved designs. They differ in lightness too, and every box is also labelled. */
 export const PART_COLORS: Record<PartId, string> = {

@@ -8,13 +8,13 @@ import {
   type ImageOps,
   type RunOptions,
   type VisionBackend,
-} from '@brume/ocr-engine';
+} from '@inkstat/ocr-engine';
 import {
   LlamaVisionBackend,
   expoImageOps,
   modelPaths,
   modelStatus,
-} from '@brume/ocr-engine/native';
+} from '@inkstat/ocr-engine/native';
 import { File, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { Platform } from 'react-native';

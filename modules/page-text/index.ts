@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
-import type { TextLine } from '@brume/ocr-engine';
+import type { TextLine } from '@inkstat/ocr-engine';
 
 interface NativePageText {
   recognize(uri: string): Promise<TextLine[]>;

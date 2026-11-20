@@ -1,4 +1,4 @@
-import type { ExtractionProgress, NormRect } from '@brume/ocr-engine';
+import type { ExtractionProgress, NormRect } from '@inkstat/ocr-engine';
 import { router, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -21,7 +21,7 @@ import {
   type PageReading,
   type ScorebookTemplate,
   type Side,
-} from '@brume/basketball';
+} from '@inkstat/basketball';
 import { extract, getActiveModelId } from '@/engine/host';
 import { keepImage, newId } from '@/lib/files';
 import { recognizePageText } from '../../modules/page-text';
@@ -40,7 +40,7 @@ const REGION_LABELS: Record<string, string> = {
 /** uri / rect: the page being read and the part of it being read now, for the animation. */
 type Status = { text: string; detail: string; fraction: number; startedAt: number; uri?: string; rect?: NormRect | null } | null;
 
-const KEEP_AWAKE_TAG = 'brume-reading';
+const KEEP_AWAKE_TAG = 'inkstat-reading';
 
 /** Within one crop: encoding the image is roughly the first 40%, writing the answer the rest. */
 function cropFraction(p: ExtractionProgress): number {
@@ -115,10 +115,10 @@ export default function Scan() {
     abort.current = new AbortController();
     const signal = abort.current.signal;
     const id = newId();
-    // If Android kills Brume for memory mid-read, nothing in JS runs; this marker lets
+    // If Android kills InkStat for memory mid-read, nothing in JS runs; this marker lets
     // the next launch explain what happened instead of silently landing on Home.
     await setSetting(db, READ_IN_PROGRESS_KEY, String(Date.now()));
-    // A read takes minutes. If the screen locks, Android demotes Brume to a cached
+    // A read takes minutes. If the screen locks, Android demotes InkStat to a cached
     // process, the first thing it kills to free memory; keep the screen on until done.
     await activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => undefined);
     try {
@@ -219,7 +219,7 @@ export default function Scan() {
           <T muted style={base.small}>{status.detail}</T>
           <T muted style={[base.small, base.num]}>{elapsed}</T>
         </View>
-        <T muted>This takes a minute or two per page on most phones. Keep Brume open.</T>
+        <T muted>This takes a minute or two per page on most phones. Keep InkStat open.</T>
         <Button title="Cancel" kind="secondary" onPress={() => abort.current?.abort()} />
       </View>
     );
@@ -252,10 +252,10 @@ export default function Scan() {
           </View>
           <T muted>
             {layout
-              ? `Brume reads the ${markedParts(layout).length} parts you marked on this kind of scorebook.`
+              ? `InkStat reads the ${markedParts(layout).length} parts you marked on this kind of scorebook.`
               : templateCount
                 ? 'None of your templates can read pages yet: each needs player rows, names and points marked. Finish one, or make one from this photo.'
-                : 'Show Brume where each part of your scorebook is, once per kind of book. Reading is much more accurate afterwards.'}
+                : 'Show InkStat where each part of your scorebook is, once per kind of book. Reading is much more accurate afterwards.'}
           </T>
           {layout ? (
             <Button title="Change template" kind="secondary" onPress={() => router.push('/templates')} />

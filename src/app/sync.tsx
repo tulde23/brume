@@ -71,7 +71,7 @@ export default function SyncScreen() {
   return (
     <ScrollView style={[base.screen, { backgroundColor: c.bg }]} contentContainerStyle={base.content} keyboardShouldPersistTaps="handled">
       <T muted>
-        Optional. Back up games to your Brume server and share them across devices. Brume works fully
+        Optional. Back up games to your InkStat server and share them across devices. InkStat works fully
         offline without it; page photos stay on this phone.
       </T>
 
@@ -81,7 +81,7 @@ export default function SyncScreen() {
           <TextInput
             value={url}
             onChangeText={setUrl}
-            placeholder="https://brume-api.up.railway.app"
+            placeholder="https://inkstat-api.up.railway.app"
             placeholderTextColor={c.muted}
             autoCapitalize="none"
             autoCorrect={false}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy test-bench sample pages onto a phone running a development build of Brume.
+# Copy test-bench sample pages onto a phone running a development build of InkStat.
 #
 #   scripts/push-bench.sh <samples-dir> [adb-serial]
 #
@@ -13,8 +13,8 @@ local_path() { command -v cygpath >/dev/null && cygpath -w "$1" || echo "$1"; }
 SRC="${1:?usage: push-bench.sh <samples-dir> [adb-serial]}"
 ADB="${ADB:-adb}"
 [ -n "${2:-}" ] && ADB="$ADB -s $2"
-PKG=com.brume.app
-TMP=/data/local/tmp/brume-bench
+PKG=com.inkstat.app
+TMP=/data/local/tmp/inkstat-bench
 
 $ADB shell rm -rf "$TMP"
 $ADB shell mkdir -p "$TMP"
@@ -29,4 +29,4 @@ done
 # Into the app's private files (needs a debuggable build).
 $ADB shell "run-as $PKG sh -c 'rm -rf files/bench && mkdir -p files/bench && cp -r $TMP/* files/bench/'"
 $ADB shell rm -rf "$TMP"
-echo "done: open Brume, hold the logo on Home, run the bench"
+echo "done: open InkStat, hold the logo on Home, run the bench"

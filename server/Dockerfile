@@ -1,5 +1,5 @@
-# Brume sync API. Build from the REPO ROOT so the shared packages are in context:
-#   docker build -f server/Dockerfile -t brume-api .
+# InkStat sync API. Build from the REPO ROOT so the shared packages are in context:
+#   docker build -f server/Dockerfile -t inkstat-api .
 # On Railway, set the service variable RAILWAY_DOCKERFILE_PATH=server/Dockerfile.
 
 # --- toolchain: better-sqlite3 compiles its native addon at install time ---

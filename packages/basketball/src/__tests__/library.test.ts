@@ -1,4 +1,4 @@
-import type { NormRect, TextLine } from '@brume/ocr-engine';
+import type { NormRect, TextLine } from '@inkstat/ocr-engine';
 
 import { LIBRARY, alignParts, matchLibrary, templateForPhoto } from '../library';
 import { applyTemplate, migrateTemplate, newTemplate } from '../scorebook';

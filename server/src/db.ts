@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 
-import type { Game } from '@brume/basketball';
+import type { Game } from '@inkstat/basketball';
 
 export type DB = Database.Database;
 

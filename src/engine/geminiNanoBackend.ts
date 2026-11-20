@@ -1,4 +1,4 @@
-import type { GenerateRequest, GenerateResult, VisionBackend } from '@brume/ocr-engine';
+import type { GenerateRequest, GenerateResult, VisionBackend } from '@inkstat/ocr-engine';
 
 import { GeminiNano, NanoError, nanoErrorCode } from '../../modules/gemini-nano';
 
@@ -73,9 +73,9 @@ export class GeminiNanoBackend implements VisionBackend {
 export function describeNanoError(code: number | null, e: unknown): string {
   switch (code) {
     case NanoError.BACKGROUND_USE_BLOCKED:
-      return 'Gemini Nano only works while Brume is on screen. Keep Brume open while it reads.';
+      return 'Gemini Nano only works while InkStat is on screen. Keep InkStat open while it reads.';
     case NanoError.BATTERY_QUOTA:
-      return "Android's daily limit for on-device AI in Brume was reached. Try again later, or switch models.";
+      return "Android's daily limit for on-device AI in InkStat was reached. Try again later, or switch models.";
     case NanoError.BUSY:
       return 'Gemini Nano is busy. Wait a moment and try again.';
     case NanoError.NOT_ENOUGH_DISK_SPACE:

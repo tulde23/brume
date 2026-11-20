@@ -1,4 +1,4 @@
-import type { NormRect } from '@brume/ocr-engine';
+import type { NormRect } from '@inkstat/ocr-engine';
 
 import { placeParts, suggestParts } from '../autoPlace';
 // What ML Kit text recognition returned for the Stars training sheet on a Pixel 10 Pro

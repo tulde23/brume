@@ -1,8 +1,8 @@
 {
-  "name": "@brume/server",
+  "name": "@inkstat/server",
   "version": "0.1.0",
   "private": true,
-  "description": "Brume sync API: stores scorebook games per team space in SQLite.",
+  "description": "InkStat sync API: stores scorebook games per team space in SQLite.",
   "type": "module",
   "engines": {
     "node": ">=22"
