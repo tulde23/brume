@@ -1,7 +1,11 @@
 import type { ExtractionRun, RegionResult } from '@brume/ocr-engine';
 
 import {
+  SCOREBOOK_PAGE_TEMPLATE,
+  applyScorebookLayout,
   emptyTeam,
+  isPlayerName,
+  normalizeLayout,
   gameToCsv,
   mergePlayers,
   normalizeDate,
@@ -276,5 +280,45 @@ describe('season totals and export', () => {
   it('escapes CSV fields with commas', () => {
     const csv = gameToCsv(game('a', [player({ number: '3', name: 'Kim', points: 5 })]));
     expect(csv.split('\n')[1]).toBe('2026-11-14,Eagles,"Lakeview, North",3,Kim,,,,,,5');
+  });
+});
+
+describe('scorebook layout', () => {
+  it('reads the player table from the marked box with joined name and points columns', () => {
+    const t = applyScorebookLayout(SCOREBOOK_PAGE_TEMPLATE, {
+      version: 1,
+      table: { x: 0.1, y: 0.36, w: 0.8, h: 0.4 },
+      nameColumn: { x: 0.11, w: 0.17 },
+      pointsColumn: { x: 0.83, w: 0.03 },
+    });
+    const players = t.regions.find((r) => r.id === 'players')!;
+    expect(players.rect).toEqual({ x: 0.1, y: 0.36, w: 0.8, h: 0.4 });
+    expect(players.joinColumns).toBe(true);
+    expect(players.columns?.map((c) => c.label)).toEqual(['jersey number and player name', 'total points (TP or PTS)']);
+    expect(players.tiles).toMatchObject({ targetAspect: expect.any(Number) });
+    expect(t.regions.find((r) => r.id === 'summary')).toEqual(SCOREBOOK_PAGE_TEMPLATE.regions[0]);
+  });
+
+  it('keeps bands inside the table and the table inside the page', () => {
+    const l = normalizeLayout({
+      version: 1,
+      table: { x: 0.9, y: -0.2, w: 0.5, h: 2 },
+      nameColumn: { x: 0, w: 0.5 },
+      pointsColumn: { x: 0.99, w: 0.2 },
+    });
+    expect(l.table.x + l.table.w).toBeLessThanOrEqual(1);
+    expect(l.table.y).toBe(0);
+    expect(l.nameColumn.x).toBeGreaterThanOrEqual(l.table.x);
+    expect(l.pointsColumn.x + l.pointsColumn.w).toBeLessThanOrEqual(l.table.x + l.table.w + 1e-9);
+  });
+});
+
+describe('isPlayerName', () => {
+  it('rejects digits and printed form labels', () => {
+    expect(isPlayerName('Robinson')).toBe(true);
+    expect(isPlayerName('Running Score')).toBe(false);
+    expect(isPlayerName('Player Scoring')).toBe(false);
+    expect(isPlayerName('14')).toBe(false);
+    expect(isPlayerName(null)).toBe(false);
   });
 });

@@ -73,6 +73,16 @@ function playerKey(p: PlayerLine): string | null {
   return name ? `n:${name}` : null;
 }
 
+/** Printed labels a model may copy into the name column (seen on the Stars sheet: "Running Score"). */
+const FORM_LABEL =
+  /^(running score|player scoring|player|players|name|team|team fouls?|coach|timeouts?|totals?|score by (quarters|periods)|fouls|no\.?)$/i;
+
+export function isPlayerName(name: string | null): boolean {
+  if (!name) return false;
+  const n = name.trim();
+  return n.length > 0 && !/^[\d\s.,-]+$/.test(n) && !FORM_LABEL.test(n);
+}
+
 export function mergePlayers(rows: PlayerLine[]): PlayerLine[] {
   const out: PlayerLine[] = [];
   const index = new Map<string, number>();
@@ -145,8 +155,8 @@ export function readPage(run: ExtractionRun): PageReading {
 
   // Player tables always have names. Nameless rows next to named ones are almost
   // always numbers picked up from a nearby grid (running score, team fouls).
-  // A "name" that is only digits is a number picked up from another grid, not a player.
-  const named = team.players.filter((p) => p.name && !/^[\d\s.,-]+$/.test(p.name));
+  // A "name" that is only digits, or a printed form label, is not a player.
+  const named = team.players.filter((p) => isPlayerName(p.name));
   if (named.length >= 3 && named.length < team.players.length) {
     notes.push(`Dropped ${team.players.length - named.length} row(s) with no player name.`);
     team.players = named;

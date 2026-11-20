@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import type { Game } from '@brume/basketball';
+import type { Game, ScorebookLayout } from '@brume/basketball';
 
 export const DB_NAME = 'brume.db';
 
@@ -115,4 +115,26 @@ export async function setSetting(db: SQLiteDatabase, key: string, value: string)
     key,
     value,
   );
+}
+
+const LAYOUT_KEY = 'layout.basketball.scorebook';
+
+/** The user's marked scorebook layout, if they have set one up. */
+export async function getScorebookLayout(db: SQLiteDatabase): Promise<ScorebookLayout | null> {
+  const raw = await getSetting(db, LAYOUT_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as ScorebookLayout;
+    return parsed.version === 1 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveScorebookLayout(db: SQLiteDatabase, layout: ScorebookLayout): Promise<void> {
+  await setSetting(db, LAYOUT_KEY, JSON.stringify(layout));
+}
+
+export async function clearScorebookLayout(db: SQLiteDatabase): Promise<void> {
+  await clearSetting(db, LAYOUT_KEY);
 }

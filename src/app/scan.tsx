@@ -1,20 +1,22 @@
 import type { ExtractionProgress } from '@brume/ocr-engine';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, View } from 'react-native';
 
-import { READ_IN_PROGRESS_KEY, clearSetting, saveGame, setSetting } from '@/db';
+import { READ_IN_PROGRESS_KEY, clearSetting, getScorebookLayout, saveGame, setSetting } from '@/db';
 import {
   SCOREBOOK_PAGE_TEMPLATE,
+  applyScorebookLayout,
   emptyTeam,
   normalizeDate,
   readPage,
   seasonFor,
   type Game,
   type PageReading,
+  type ScorebookLayout,
   type Side,
 } from '@brume/basketball';
 import { extract, getActiveModelId } from '@/engine/host';
@@ -61,6 +63,14 @@ export default function Scan() {
   const db = useSQLiteContext();
   const c = useColors();
   const [pages, setPages] = useState<Record<Side, string | null>>({ home: null, away: null });
+  const [layout, setLayout] = useState<ScorebookLayout | null>(null);
+
+  // Re-read after returning from the layout screen.
+  useFocusEffect(
+    useCallback(() => {
+      getScorebookLayout(db).then(setLayout);
+    }, [db]),
+  );
   const [status, setStatus] = useState<Status>(null);
   const elapsed = useElapsed(status?.startedAt ?? null);
   const abort = useRef<AbortController | null>(null);
@@ -106,7 +116,8 @@ export default function Scan() {
 
       for (const [i, side] of sides.entries()) {
         const uri = keepImage(pages[side]!, id, side);
-        const run = await extract(modelId, uri, SCOREBOOK_PAGE_TEMPLATE, {
+        const template = layout ? applyScorebookLayout(SCOREBOOK_PAGE_TEMPLATE, layout) : SCOREBOOK_PAGE_TEMPLATE;
+        const run = await extract(modelId, uri, template, {
           signal,
           onModelLoad: (f) =>
             setStatus({ text: 'Loading the reading model…', detail: '', fraction: f, startedAt }),
@@ -206,6 +217,26 @@ export default function Scan() {
           </View>
         </Card>
       ))}
+      {(pages.home || pages.away) && (
+        <Card>
+          <View style={[base.row, { justifyContent: 'space-between' }]}>
+            <T style={base.h2}>Scorebook layout</T>
+            <T muted>{layout ? 'Saved' : 'Not set'}</T>
+          </View>
+          <T muted>
+            {layout
+              ? 'Brume reads the player rows from the box you marked. Edit it if you switch scorebooks.'
+              : 'Mark where the player rows, names and points are, once for your scorebook. Reading is much more accurate afterwards.'}
+          </T>
+          <Button
+            title={layout ? 'Edit layout' : 'Set up layout'}
+            kind={layout ? 'secondary' : 'primary'}
+            onPress={() =>
+              router.push({ pathname: '/scorebook-layout', params: { uri: (pages.home ?? pages.away)! } })
+            }
+          />
+        </Card>
+      )}
       <Button title="Read pages" onPress={read} disabled={!pages.home && !pages.away} />
     </ScrollView>
   );

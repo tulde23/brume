@@ -43,12 +43,27 @@ export type FieldSchema =
       description?: string;
     };
 
-export interface TileSpec {
+/** A fixed number of horizontal strips. */
+export interface FixedTileSpec {
   /** Number of horizontal strips to cut the region into. */
   rows: number;
   /** Fraction of a strip's height shared with its neighbour, so rows on a seam are not lost. */
   overlap: number;
 }
+
+/**
+ * As many strips as it takes for each crop to have roughly this width:height
+ * ratio. Models that resize to a square (Gemini Nano) read best near 1, since
+ * nothing gets squeezed.
+ */
+export interface AspectTileSpec {
+  targetAspect: number;
+  overlap: number;
+  minRows?: number;
+  maxRows?: number;
+}
+
+export type TileSpec = FixedTileSpec | AspectTileSpec;
 
 /**
  * A vertical slice of a region, in page coordinates (0..1). Wide tables often

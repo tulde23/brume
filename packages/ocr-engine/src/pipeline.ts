@@ -1,4 +1,4 @@
-import { tileRects, toPixels } from './geometry';
+import { stripCount, tileRects, toPixels } from './geometry';
 import { coerce, describeSchema, extractJson, toJsonSchema } from './schema';
 import type {
   DocumentTemplate,
@@ -98,7 +98,11 @@ export async function runTemplate(
     : template.regions;
 
   const jobs = regions.flatMap((region) =>
-    tileRects(region.rect, region.tiles).map((rect, tileIndex, all) => ({
+    tileRects(
+      region.rect,
+      region.tiles,
+      stripCount(region, width, height, columnLayout(region, images) === 'joined'),
+    ).map((rect, tileIndex, all) => ({
       region,
       rect,
       tileIndex,
@@ -220,4 +224,18 @@ export function resultsFor(run: ExtractionRun, regionId: string): RegionResult[]
   return run.results
     .filter((r) => r.regionId === regionId)
     .sort((a, b) => a.tileIndex - b.tileIndex);
+}
+
+/**
+ * Replace parts of a template's regions, e.g. with a layout the user marked for
+ * their kind of document. Regions not named keep their defaults.
+ */
+export function withRegionOverrides(
+  template: DocumentTemplate,
+  overrides: Record<string, Partial<Omit<RegionSpec, 'id'>>>,
+): DocumentTemplate {
+  return {
+    ...template,
+    regions: template.regions.map((r) => (overrides[r.id] ? { ...r, ...overrides[r.id] } : r)),
+  };
 }
