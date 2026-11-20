@@ -68,7 +68,10 @@ export default function Home() {
         ListHeaderComponent={
           <View style={{ gap: space.lg }}>
             <View style={styles.between}>
-              <Logo size={28} />
+              {/* Development builds: hold the logo to open the test bench. */}
+              <Pressable onLongPress={__DEV__ ? () => router.push('/bench') : undefined} accessible={false}>
+                <Logo size={28} />
+              </Pressable>
               <View style={base.row}>
               <Pressable
                 onPress={() => router.push('/sync')}

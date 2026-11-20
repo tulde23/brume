@@ -10,12 +10,16 @@ import {
   newTemplate,
   normalizeTemplate,
   partSpec,
+  alignParts,
+  anchorsForTemplate,
+  matchLibrary,
   placeParts,
   readPage,
   templateChecks,
   type PartCheck,
   type PartGroup,
   type PartId,
+  type LibraryMatch,
   type Placement,
   type ScorebookTemplate,
 } from '@brume/basketball';
@@ -41,7 +45,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getTemplate, listTemplates, saveTemplate, setActiveTemplate } from '@/db';
 import { extract, getActiveModelId } from '@/engine/host';
-import { keepImage } from '@/lib/files';
+import { keepImage, readBenchMarks, writeBenchMarks } from '@/lib/files';
 import { recognizePageText } from '../../modules/page-text';
 import { Button, Card, ProgressBar, T } from '@/ui/components';
 import { PageMarker, PhotoCrop, type MarkerShape } from '@/ui/PageMarker';
@@ -101,7 +105,8 @@ const GROUPS: { group: PartGroup; title: string }[] = [
 ];
 
 export default function TemplateEditor() {
-  const { id, uri } = useLocalSearchParams<{ id?: string; uri?: string }>();
+  // benchId (development): mark a test-bench sample's boxes; saving writes them to that sample.
+  const { id, uri, benchId } = useLocalSearchParams<{ id?: string; uri?: string; benchId?: string }>();
   const db = useSQLiteContext();
   const c = useColors();
   const { width: screenW, height: screenH } = useWindowDimensions();
@@ -112,12 +117,25 @@ export default function TemplateEditor() {
   const [detail, setDetail] = useState(0);
   const [aspect, setAspect] = useState<number | null>(null);
   // Where the printed labels suggest each part is; computed once per photo.
-  const [placement, setPlacement] = useState<{ uri: string; result: Placement | null } | null>(null);
-  const [autoPlaced, setAutoPlaced] = useState<PartId[] | null>(null);
+  const [placement, setPlacement] = useState<{
+    uri: string;
+    result: Placement | null;
+    /** A built-in scorebook this photo was recognised as, with its boxes lined up to the photo. */
+    library: (LibraryMatch & { parts: ReturnType<typeof alignParts> }) | null;
+    anchors: ScorebookTemplate['anchors'];
+  } | null>(null);
+  const [autoPlaced, setAutoPlaced] = useState<{ parts: PartId[]; recognised: string | null } | null>(null);
 
   // Load: an existing template opens on review; a new one starts on the photo.
   useEffect(() => {
     (async () => {
+      if (benchId && uri) {
+        const saved = readBenchMarks(benchId);
+        const t = newTemplate(`bench-${benchId}`, `Bench: ${benchId}`, uri);
+        setTpl(saved ? { ...t, ...saved } : t);
+        setPhase(saved ? 'review' : 'pick');
+        return;
+      }
       if (id) {
         const t = await getTemplate(db, id);
         if (t) {
@@ -130,7 +148,7 @@ export default function TemplateEditor() {
       const tid = `tpl-${Date.now().toString(36)}`;
       setTpl(newTemplate(tid, count ? `Scorebook ${count + 1}` : 'My scorebook', uri ? keepImage(uri, tid, 'photo') : null));
     })();
-  }, [db, id, uri]);
+  }, [db, id, uri, benchId]);
 
   const photo = tpl?.photoUri ?? null;
   useEffect(() => {
@@ -144,17 +162,22 @@ export default function TemplateEditor() {
     recognizePageText(photo).then((lines) => {
       if (!live) return;
       const result = lines ? placeParts(lines) : null;
+      const lib = lines ? matchLibrary(lines) : null;
+      const library = lib ? { ...lib, parts: alignParts(lib.layout.parts, lib.match) } : null;
+      if (lib) console.log(`[library] matched ${lib.layout.id}: ${lib.match.inliers}/${lib.match.total} labels`);
       // Development builds log the recognized text, to capture new test fixtures for placement.
       if (__DEV__) lines?.forEach((l) => console.log(`[autoplace-text] ${l.text} @ ${[l.rect.x, l.rect.y, l.rect.w, l.rect.h].map((n) => n.toFixed(3)).join(',')} | ${l.words.map((w) => `${w.text}:${w.rect.x.toFixed(3)},${w.rect.y.toFixed(3)},${w.rect.w.toFixed(3)},${w.rect.h.toFixed(3)}`).join(' ')}`));
       console.log(`[autoplace] ${lines?.length ?? 'no'} text lines; placed ${result?.found.join(', ') || 'nothing'}`);
-      setPlacement({ uri: photo, result });
+      setPlacement({ uri: photo, result, library, anchors: lines ? anchorsForTemplate(lines) : undefined });
     });
     return () => {
       live = false;
     };
   }, [photo]);
-  const suggested = placement?.uri === photo ? placement.result : null;
-  const startRect = (p: PartId) => suggested?.parts[p] ?? DEFAULT_PARTS[p];
+  const current = placement?.uri === photo ? placement : null;
+  const suggested = current?.result ?? null;
+  // A recognised built-in book knows where everything is; label guessing is the fallback.
+  const startRect = (p: PartId) => current?.library?.parts[p] ?? suggested?.parts[p] ?? DEFAULT_PARTS[p];
 
   if (!tpl) return <View style={[base.screen, { backgroundColor: c.bg }]} />;
 
@@ -178,7 +201,12 @@ export default function TemplateEditor() {
   };
 
   const save = async (t: ScorebookTemplate) => {
-    const clean = normalizeTemplate(t);
+    // Keep this photo's printed labels, so later photos can be lined up with the boxes.
+    const clean = normalizeTemplate({ ...t, anchors: t.anchors ?? current?.anchors });
+    if (benchId) {
+      writeBenchMarks(benchId, clean);
+      return clean;
+    }
     await saveTemplate(db, clean);
     // The first usable template becomes the one scans use.
     const all = await listTemplates(db);
@@ -218,12 +246,25 @@ export default function TemplateEditor() {
           }}
           placing={!!photo && placement?.uri !== photo}
           onAuto={() => {
-            update((t) => {
-              const parts = { ...t.parts };
-              for (const p of t.enabled) parts[p] = startRect(p);
-              return { ...t, parts };
-            });
-            setAutoPlaced(tpl.enabled.filter((p) => suggested?.found.includes(p)));
+            const lib = current?.library;
+            if (lib) {
+              // A known book: use its parts, lined up to this photo.
+              update((t) => ({
+                ...t,
+                enabled: lib.layout.enabled,
+                parts: { ...lib.parts },
+                foulsKind: lib.layout.foulsKind,
+                builtinId: lib.layout.id,
+              }));
+              setAutoPlaced({ parts: lib.layout.enabled, recognised: lib.layout.name });
+            } else {
+              update((t) => {
+                const parts = { ...t.parts };
+                for (const p of t.enabled) parts[p] = startRect(p);
+                return { ...t, parts };
+              });
+              setAutoPlaced({ parts: tpl.enabled.filter((p) => suggested?.found.includes(p)), recognised: null });
+            }
             setPhase('review');
           }}
         />
@@ -302,7 +343,7 @@ export default function TemplateEditor() {
           onBack={() => setPhase('review')}
           onSave={async (result) => {
             const saved = await save({ ...tpl, test: result });
-            if (isUsable(saved)) await setActiveTemplate(db, saved.id);
+            if (isUsable(saved) && !benchId) await setActiveTemplate(db, saved.id);
             router.back();
           }}
         />
@@ -695,7 +736,7 @@ function ReviewPhase({
   onSave,
   onRect,
 }: {
-  autoPlaced: PartId[] | null;
+  autoPlaced: { parts: PartId[]; recognised: string | null } | null;
   tpl: ScorebookTemplate;
   c: Colors;
   uri: string;
@@ -725,12 +766,16 @@ function ReviewPhase({
           <View style={[base.content, { paddingTop: 0 }]}>
             <Card style={{ backgroundColor: c.accent + '1F', borderColor: c.accent }}>
               <T style={{ fontFamily: fonts.bodyBold, color: c.accent }}>
-                {`Brume placed ${autoPlaced.length} of ${tpl.enabled.length} parts from the printed labels`}
+                {autoPlaced.recognised
+                  ? `Recognised: ${autoPlaced.recognised}`
+                  : `Brume placed ${autoPlaced.parts.length} of ${tpl.enabled.length} parts from the printed labels`}
               </T>
               <T style={{ fontSize: 14, lineHeight: 20 }}>
-                {autoPlaced.length < tpl.enabled.length
-                  ? `Check every box, especially ${tpl.enabled.filter((p) => !autoPlaced.includes(p)).map((p) => partSpec(p).name.toLowerCase()).join(', ')}: those are only a guess. Then run the test read.`
-                  : 'Check every box, then run the test read to see what Brume reads with them.'}
+                {autoPlaced.recognised
+                  ? 'Every box comes from this book\u2019s built-in template, lined up to your photo. Check them, then run the test read.'
+                  : autoPlaced.parts.length < tpl.enabled.length
+                    ? `Check every box, especially ${tpl.enabled.filter((p) => !autoPlaced.parts.includes(p)).map((p) => partSpec(p).name.toLowerCase()).join(', ')}: those are only a guess. Then run the test read.`
+                    : 'Check every box, then run the test read to see what Brume reads with them.'}
               </T>
             </Card>
           </View>

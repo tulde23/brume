@@ -12,6 +12,7 @@ import {
   applyTemplate,
   isUsable,
   markedParts,
+  templateForPhoto,
   emptyTeam,
   normalizeDate,
   readPage,
@@ -23,6 +24,7 @@ import {
 } from '@brume/basketball';
 import { extract, getActiveModelId } from '@/engine/host';
 import { keepImage, newId } from '@/lib/files';
+import { recognizePageText } from '../../modules/page-text';
 import { Button, Card, ProgressBar, T } from '@/ui/components';
 import { base, space, useColors } from '@/ui/theme';
 
@@ -122,7 +124,12 @@ export default function Scan() {
 
       for (const [i, side] of sides.entries()) {
         const uri = keepImage(pages[side]!, id, side);
-        const template = layout ? applyTemplate(SCOREBOOK_PAGE_TEMPLATE, layout) : SCOREBOOK_PAGE_TEMPLATE;
+        // Line the template up with this photo by its printed labels (or recognise a
+        // built-in book when there is no template); otherwise use the boxes as saved.
+        const lines = await recognizePageText(uri);
+        const chosen = templateForPhoto(layout, lines);
+        console.log(`[scan] ${side} template: ${chosen.source}${chosen.detail ? ` (${chosen.detail})` : ''}`);
+        const template = chosen.template ? applyTemplate(SCOREBOOK_PAGE_TEMPLATE, chosen.template) : SCOREBOOK_PAGE_TEMPLATE;
         const run = await extract(modelId, uri, template, {
           signal,
           onModelLoad: (f) =>

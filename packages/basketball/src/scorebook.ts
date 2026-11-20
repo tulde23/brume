@@ -1,4 +1,4 @@
-import { withRegionOverrides, type DocumentTemplate, type FieldSchema, type NormRect, type PieceSpec } from '@brume/ocr-engine';
+import { withRegionOverrides, type DocumentTemplate, type FieldSchema, type NormRect } from '@brume/ocr-engine';
 
 /**
  * A scorebook template: where each part of one kind of scorebook sits, marked
@@ -163,6 +163,14 @@ export interface ScorebookTemplate {
   foulsKind: 'boxes' | 'total';
   /** The photo the template was made on, for editing and re-testing. */
   photoUri: string | null;
+  /**
+   * Printed labels on the template's photo and where they were. A new photo is
+   * matched against them and the boxes are moved to fit it (optional: older
+   * templates lack them and assume photos framed the same way).
+   */
+  anchors?: { text: string; x: number; y: number }[];
+  /** Built-in layout this template started from, if any. */
+  builtinId?: string;
   /** Last test read on that photo. */
   test: { at: number; seconds: number; checks: number; problems: number } | null;
   createdAt: number;
@@ -259,11 +267,16 @@ export const isUsable = (t: ScorebookTemplate) => REQUIRED_PARTS.every((id) => t
 
 // Region ids added by templates; assemble.ts reads them.
 export const REGION = {
+  /** Older templates read all game details in one region. */
   details: 'details',
+  fouls: 'player_fouls',
   timeouts: 'timeouts',
   teamFouls: 'team_fouls',
   quarters: 'quarters',
 } as const;
+
+/** Region id for one game detail's own read. */
+export const detailRegion = (id: 'teamName' | 'coach' | 'location' | 'date') => `detail_${DETAIL_FIELDS[id].key}`;
 
 const DETAIL_FIELDS: Record<'teamName' | 'coach' | 'location' | 'date', { key: string; label: string }> = {
   teamName: { key: 'team_name', label: 'team name' },
@@ -294,14 +307,10 @@ export function applyTemplate(base: DocumentTemplate, raw: ScorebookTemplate): D
 
   let doc = base;
   if (rows && has('names') && has('points')) {
-    const fouls = has('fouls');
-    const foulLabel =
-      t.foulsKind === 'total'
-        ? 'fouls (F total)'
-        : 'foul boxes (P1 to P5; count the crossed-off boxes)';
+    // Points and fouls are read in separate passes. Measured on the Stars sheet with
+    // Gemini Nano: names | TP gets every total; names | fouls | TP lost both.
     const columns = [
       { ...(t.parts.names as Band), label: 'jersey number and player name' },
-      ...(fouls ? [{ ...(t.parts.fouls as Band), label: foulLabel }] : []),
       { ...(t.parts.points as Band), label: 'total points (TP or PTS)' },
     ].sort((a, b) => a.x - b.x);
     doc = withRegionOverrides(doc, {
@@ -313,38 +322,68 @@ export function applyTemplate(base: DocumentTemplate, raw: ScorebookTemplate): D
         tiles: { targetAspect: 1.2, overlap: 0.1, minRows: 2, maxRows: 10 },
         prompt:
           'These are rows from the player table of a basketball scorebook. Each row is one player. ' +
-          'For each row with a player written in, give the jersey number, the name, the total points' +
-          (fouls
-            ? t.foulsKind === 'total'
-              ? ', and the fouls from the F column. '
-              : ', and the fouls: how many of that row’s foul boxes are crossed off or marked. '
-            : '. Fouls are not shown here: use null for f. ') +
+          'For each row with a player written in, give the jersey number, the name, and the total points. ' +
+          'Fouls are not shown here: use null for f. ' +
           'Use null for any blank cell; do not write 0 unless a 0 is written. Skip empty rows.',
       },
     });
   }
 
   const extra: DocumentTemplate['regions'] = [];
-  const details = (['teamName', 'coach', 'location', 'date'] as const).filter(has);
-  if (details.length) {
-    const pieces: PieceSpec[] = details.map((id) => ({ rect: t.parts[id] as NormRect, label: DETAIL_FIELDS[id].label }));
+  if (rows && has('names') && has('fouls')) {
     extra.push({
-      id: REGION.details,
-      label: 'Game details',
-      rect: pieces[0].rect,
-      pieces,
-      stackPieces: true,
-      maxImageSide: 1024,
-      maxTokens: 120,
+      id: REGION.fouls,
+      label: 'Player fouls',
+      rect: rows,
+      columns: [
+        { ...(t.parts.names as Band), label: 'jersey number and player name' },
+        { ...(t.parts.fouls as Band), label: t.foulsKind === 'total' ? 'fouls (F total)' : 'foul boxes' },
+      ].sort((a, b) => a.x - b.x),
+      joinColumns: true,
+      tiles: { targetAspect: 1.2, overlap: 0.1, minRows: 2, maxRows: 10 },
+      maxImageSide: 2048,
+      maxTokens: 300,
       prompt:
-        'These are boxes from the header of a basketball scorebook page. Copy the handwriting in each box ' +
-        'exactly as written. Leave out printed labels like "TEAM:", "COACH:", "PLAYED AT:" or "DATE:".',
+        'These are rows from the player table of a basketball scorebook. Each row is one player. ' +
+        (t.foulsKind === 'total'
+          ? 'For each row with a player written in, give the jersey number and the number in the fouls (F) column. '
+          : 'For each row with a player written in, give the jersey number and how many of that row\u2019s foul boxes ' +
+            'are crossed off, slashed or marked (0 if none). Printed box labels like P1 or 1 are not marks. ') +
+        'Skip empty rows.',
       schema: {
         type: 'object',
-        properties: Object.fromEntries(
-          details.map((id) => [DETAIL_FIELDS[id].key, { type: 'string', nullable: true, description: DETAIL_FIELDS[id].label }]),
-        ),
+        properties: {
+          players: {
+            type: 'array',
+            maxItems: 8,
+            items: {
+              type: 'object',
+              properties: {
+                no: { type: 'string', nullable: true, description: 'jersey number' },
+                f: { type: 'integer', nullable: true, minimum: 0, maximum: 6, description: 'fouls' },
+              },
+            },
+          },
+        },
       },
+    });
+  }
+  // Each game detail is read on its own: a small box enlarged alone is the most
+  // legible (side by side, the date read 94 for 14; stacked, place and date came back blank).
+  for (const id of ['teamName', 'coach', 'location', 'date'] as const) {
+    if (!has(id)) continue;
+    const field = DETAIL_FIELDS[id];
+    extra.push({
+      id: detailRegion(id),
+      label: partSpec(id).name,
+      rect: t.parts[id] as NormRect,
+      maxImageSide: 1024,
+      maxTokens: 40,
+      prompt:
+        `This box is from the header of a basketball scorebook page and holds the ${field.label}. ` +
+        'Copy the handwriting exactly as written. Leave out printed labels like "TEAM:", "COACH:", "PLAYED AT:" or "DATE:". ' +
+        'Use null if nothing is written.',
+      schema: { type: 'object', properties: { [field.key]: { type: 'string', nullable: true, description: field.label } } },
     });
   }
   if (has('timeouts')) {

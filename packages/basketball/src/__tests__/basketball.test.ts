@@ -2,6 +2,7 @@ import type { ExtractionRun, RegionResult } from '@brume/ocr-engine';
 
 import {
   SCOREBOOK_PAGE_TEMPLATE,
+  dropFinalFromPeriods,
   REGION,
   REQUIRED_PARTS,
   applyTemplate,
@@ -310,26 +311,46 @@ describe('scorebook templates', () => {
     },
   });
 
-  it('reads the player table from the marked columns, joined left to right', () => {
+  it('reads points from names | TP, and fouls in their own names | fouls pass', () => {
     const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, marked());
     const players = t.regions.find((r) => r.id === 'players')!;
     expect(players.rect).toEqual({ x: 0.1, y: 0.36, w: 0.8, h: 0.4 });
     expect(players.joinColumns).toBe(true);
-    expect(players.columns?.map((c) => c.x)).toEqual([0.11, 0.45, 0.83]);
-    expect(players.columns?.[1].label).toContain('foul boxes');
-    expect(players.prompt).toContain('crossed off');
+    expect(players.columns?.map((c) => c.x)).toEqual([0.11, 0.83]);
+    expect(players.prompt).toContain('use null for f');
+    const fouls = t.regions.find((r) => r.id === REGION.fouls)!;
+    expect(fouls.columns?.map((c) => c.x)).toEqual([0.11, 0.45]);
+    expect(fouls.prompt).toContain('crossed off');
   });
 
   it('asks for the F total instead when the book writes one', () => {
     const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, { ...marked(), foulsKind: 'total' });
-    expect(t.regions.find((r) => r.id === 'players')!.columns?.[1].label).toBe('fouls (F total)');
+    expect(t.regions.find((r) => r.id === REGION.fouls)!.columns?.[1].label).toBe('fouls (F total)');
   });
 
-  it('reads game details as one joined image of their boxes', () => {
-    const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, marked());
-    const details = t.regions.find((r) => r.id === REGION.details)!;
-    expect(details.pieces?.map((p) => p.label)).toEqual(['team name', "coach's name", 'where the game was played', 'date']);
-    expect(Object.keys((details.schema as { properties: object }).properties)).toEqual(['team_name', 'coach', 'location', 'date']);
+  it('reads each game detail in its own small read', () => {
+    const ids = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, marked()).regions.map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining(['detail_team_name', 'detail_coach', 'detail_location', 'detail_date']));
+    expect(ids).not.toContain(REGION.details);
+  });
+
+  it('puts fouls from their own pass onto the right players by number', () => {
+    const run: ExtractionRun = {
+      templateId: 't',
+      templateVersion: 1,
+      modelId: 'test',
+      sourceUri: 'page',
+      startedAt: 0,
+      finishedAt: 1,
+      results: [
+        result('players', 0, { players: [{ no: '5', name: 'Robinson', tp: 4, f: null }, { no: '6', name: 'Ewing', tp: 2, f: null }] }),
+        result(REGION.fouls, 0, { players: [{ no: '06', f: 2 }, { no: '5', f: 1 }] }),
+        result('detail_date', 0, { date: '12-15-14' }),
+      ],
+    };
+    const page = readPage(run);
+    expect(page.team.players.map((p) => [p.number, p.fouls])).toEqual([['5', 1], ['6', 2]]);
+    expect(page.date).toBe('12-15-14');
   });
 
   it('skips the whole-page summary only when everything it covers is marked', () => {
@@ -439,5 +460,13 @@ describe('templateChecks', () => {
     expect(by.quarters).toMatchObject({ ok: true });
     expect(by.fouls).toMatchObject({ ok: false, value: '1 read, 1 unclear' });
     expect(by.coach).toMatchObject({ ok: false, value: 'Not read' });
+  });
+});
+
+describe('dropFinalFromPeriods', () => {
+  it('drops a copied Final and empty overtime boxes, but keeps a real overtime', () => {
+    expect(dropFinalFromPeriods([15, 26, 39, 50, null, 50], 50)).toEqual([15, 26, 39, 50]);
+    expect(dropFinalFromPeriods([15, 11, 13, 11, 0], 50)).toEqual([15, 11, 13, 11]);
+    expect(dropFinalFromPeriods([15, 11, 13, 11, 6], 56)).toEqual([15, 11, 13, 11, 6]);
   });
 });

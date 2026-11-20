@@ -81,7 +81,9 @@ export function placeParts(lines: TextLine[]): Placement {
       .sort((a, b) => a.rect.x - b.rect.x)[0];
     const end = nextOnRow ? nextOnRow.rect.x - 0.008 : Math.min(0.99, start + 0.3);
     // Handwriting sits on, and often above, the label's baseline.
-    set(h.id, box(start, r.y - r.h * 1.3, end, bottom(r) + r.h * 0.4));
+    // Handwriting sits on the label's line and a little above it; not so far up that
+    // scribbles over the header (possession arrows) get in.
+    set(h.id, box(start, r.y - r.h * 0.8, end, bottom(r) + r.h * 0.4));
   }
 
   // ── Player table: header row with Player / No. / TP ──

@@ -1,6 +1,6 @@
 import { resultsFor, type ExtractionRun } from '@brume/ocr-engine';
 
-import { REGION } from './scorebook';
+import { REGION, detailRegion } from './scorebook';
 import { emptyTeam, type PlayerLine, type TeamSheet } from './types';
 
 /** Short keys from template.ts (each key repeats on every row, so short keys save real time). */
@@ -47,6 +47,21 @@ export function perPeriodScores(
     return i === 0 ? n : n - (written[i - 1] as number);
   });
   return { scores, wasCumulative: true };
+}
+
+/**
+ * Models often copy the Final box onto the end of the period list
+ * (15, 26, 39, 50, Ø, 50). Past the four quarters, a trailing blank, 0, or a
+ * repeat of the final is not an overtime period.
+ */
+export function dropFinalFromPeriods(periods: (number | null)[], final: number | null): (number | null)[] {
+  const out = [...periods];
+  while (out.length > 4) {
+    const last = out[out.length - 1];
+    if (last === null || last === 0 || (final !== null && last === final)) out.pop();
+    else break;
+  }
+  return out;
 }
 
 interface RawSummary {
@@ -129,7 +144,14 @@ export function readPage(run: ExtractionRun): PageReading {
     if (!r.data) failures.push(regionId.replace('_', ' '));
     return (r.data as T | null) ?? null;
   };
-  const details = boxed<{ team_name?: string | null; coach?: string | null; location?: string | null; date?: string | null }>(REGION.details);
+  type Details = { team_name?: string | null; coach?: string | null; location?: string | null; date?: string | null };
+  const details: Details = {
+    ...(boxed<Details>(REGION.details) ?? {}),
+    ...(boxed<Details>(detailRegion('teamName')) ?? {}),
+    ...(boxed<Details>(detailRegion('coach')) ?? {}),
+    ...(boxed<Details>(detailRegion('location')) ?? {}),
+    ...(boxed<Details>(detailRegion('date')) ?? {}),
+  };
   const quarters = boxed<{ period_scores: (number | null)[]; final_score: number | null }>(REGION.quarters);
   const timeouts = boxed<{ timeouts_used: number | null }>(REGION.timeouts);
   const teamFouls = boxed<{ team_fouls: (number | null)[] }>(REGION.teamFouls);
@@ -139,7 +161,10 @@ export function readPage(run: ExtractionRun): PageReading {
   team.coach = text(details?.coach);
   const scoreSource = quarters ?? s;
   if (scoreSource) {
-    const { scores, wasCumulative } = perPeriodScores(scoreSource.period_scores ?? [], scoreSource.final_score);
+    const { scores, wasCumulative } = perPeriodScores(
+      dropFinalFromPeriods(scoreSource.period_scores ?? [], scoreSource.final_score),
+      scoreSource.final_score,
+    );
     if (wasCumulative) notes.push('Score by period was written as running totals; converted to points per period.');
     // An overtime box holding 0 (often a slashed Ø) means no overtime was played.
     const periods = scores.filter((n, i) => i < 4 || (n !== null && n !== 0));
@@ -179,6 +204,24 @@ export function readPage(run: ExtractionRun): PageReading {
     );
   }
   team.players = mergePlayers(rows);
+
+  // Fouls come from their own read of names | fouls; match rows by jersey number.
+  const foulRows = resultsFor(run, REGION.fouls).flatMap((tile) => {
+    team.crops.push({ regionId: `${REGION.fouls}-${tile.tileIndex + 1}`, uri: tile.imageUri });
+    return (tile.data as { players: { no: string | null; f: number | null }[] } | null)?.players ?? [];
+  });
+  if (foulRows.length) {
+    const digits = (v: string | null) => (v ?? '').replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '');
+    const fouls = new Map<string, number | null>();
+    for (const r of foulRows) {
+      const k = digits(r.no);
+      if (k && (r.f !== null || !fouls.has(k))) fouls.set(k, r.f);
+    }
+    for (const p of team.players) {
+      const k = digits(p.number);
+      if (k && fouls.has(k)) p.fouls = fouls.get(k) ?? null;
+    }
+  }
 
   // Player tables always have names. Nameless rows next to named ones are almost
   // always numbers picked up from a nearby grid (running score, team fouls).

@@ -1,6 +1,6 @@
 export * from './types';
 export { SCOREBOOK_PAGE_TEMPLATE } from './template';
-export { isPlayerName, mergePlayers, normalizeDate, perPeriodScores, readPage, type PageReading } from './assemble';
+export { dropFinalFromPeriods, isPlayerName, mergePlayers, normalizeDate, perPeriodScores, readPage, type PageReading } from './assemble';
 export { DEFAULT_RULES, teamScore, validateGame, validateTeam, type ValidationRules } from './validate';
 export { pct, perGame, seasonFor, seasonTotals, teamNames, type SeasonLine } from './stats';
 export { gameToCsv, gameToJson, seasonToCsv } from './export';
@@ -27,3 +27,5 @@ export {
 } from './scorebook';
 export { templateChecks, type PartCheck } from './templateCheck';
 export { placeParts, type Placement } from './autoPlace';
+export { scoreReading, type BenchScore, type BenchTruth } from './bench';
+export { LIBRARY, alignParts, anchorsForTemplate, matchLibrary, templateForPhoto, type BuiltinLayout, type LibraryMatch, type TemplateSource } from './library';

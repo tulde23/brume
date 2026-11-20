@@ -15,5 +15,5 @@
     "**/*.ts",
     "**/*.tsx"
   ],
-  "exclude": ["node_modules", "server", "android", "ios"]
+  "exclude": ["scripts", "node_modules", "server", "android", "ios"]
 }
