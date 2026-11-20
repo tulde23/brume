@@ -17,7 +17,7 @@ export function keepImage(uri: string, folder: string, name: string): string {
 }
 
 /** Test bench (development): the hand-checked boxes for a sample, kept beside its page. */
-export type BenchMarks = Pick<ScorebookTemplate, 'enabled' | 'parts' | 'foulsKind'>;
+export type BenchMarks = Pick<ScorebookTemplate, 'enabled' | 'parts' | 'variants'>;
 
 export function readBenchMarks(benchId: string): BenchMarks | null {
   const f = new File(Paths.document, 'bench', benchId, 'marked.json');
@@ -33,7 +33,7 @@ export function writeBenchMarks(benchId: string, t: ScorebookTemplate): void {
   const f = new File(Paths.document, 'bench', benchId, 'marked.json');
   if (f.exists) f.delete();
   f.create();
-  const marks: BenchMarks = { enabled: t.enabled, parts: t.parts, foulsKind: t.foulsKind };
+  const marks: BenchMarks = { enabled: t.enabled, parts: t.parts, variants: t.variants };
   f.write(JSON.stringify(marks));
 }
 

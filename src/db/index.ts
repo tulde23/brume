@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { fromLegacyLayout, type Game, type LegacyScorebookLayout, type ScorebookTemplate } from '@brume/basketball';
+import { fromLegacyLayout, migrateTemplate, type Game, type LegacyScorebookLayout, type ScorebookTemplate } from '@brume/basketball';
 
 export const DB_NAME = 'brume.db';
 
@@ -126,7 +126,9 @@ async function readTemplates(db: SQLiteDatabase): Promise<ScorebookTemplate[]> {
   const raw = await getSetting(db, TEMPLATES_KEY);
   let list: ScorebookTemplate[] = [];
   try {
-    list = raw ? (JSON.parse(raw) as ScorebookTemplate[]).filter((t) => t.version === 2) : [];
+    list = raw
+      ? (JSON.parse(raw) as unknown[]).map(migrateTemplate).filter((t): t is ScorebookTemplate => !!t)
+      : [];
   } catch {
     list = [];
   }

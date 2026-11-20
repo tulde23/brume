@@ -2,6 +2,7 @@ import {
   DEFAULT_PARTS,
   DETAIL_PARTS,
   PARTS,
+  PART_GROUPS,
   REQUIRED_PARTS,
   SCOREBOOK_PAGE_TEMPLATE,
   applyTemplate,
@@ -14,16 +15,18 @@ import {
   anchorsForTemplate,
   matchLibrary,
   placeParts,
+  suggestParts,
+  variantOf,
   readPage,
   templateChecks,
   type PartCheck,
-  type PartGroup,
+  type PartStatus,
   type PartId,
   type LibraryMatch,
   type Placement,
   type ScorebookTemplate,
 } from '@brume/basketball';
-import type { NormRect } from '@brume/ocr-engine';
+import type { NormRect, TextLine } from '@brume/ocr-engine';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -50,6 +53,7 @@ import { recognizePageText } from '../../modules/page-text';
 import { Button, Card, ProgressBar, T } from '@/ui/components';
 import { PageMarker, PhotoCrop, type MarkerShape } from '@/ui/PageMarker';
 import { PART_COLORS } from '@/ui/partColors';
+import { ReadingView, progressRect } from '@/ui/ReadingView';
 import { base, fonts, space, useColors, type Colors } from '@/ui/theme';
 
 type Phase = 'photo' | 'pick' | 'mark' | 'review' | 'test';
@@ -98,11 +102,13 @@ function fullRect(t: ScorebookTemplate, id: PartId): NormRect | null {
   return { x: v.x, w: v.w, y: rows.y, h: rows.h };
 }
 
-const GROUPS: { group: PartGroup; title: string }[] = [
-  { group: 'needed', title: 'Needed for a box score' },
-  { group: 'details', title: 'Game details · marked on one screen' },
-  { group: 'stats', title: 'More stats' },
-];
+const STATUS_LABEL: Record<PartStatus, string> = { strong: 'Strong', ok: 'OK', weak: 'Weak', planned: 'Coming soon' };
+
+function StatusChip({ status, c }: { status: PartStatus; c: Colors }) {
+  const [bg, fg] =
+    status === 'strong' ? [c.okBg, c.ok] : status === 'ok' ? [c.accent + '22', c.accent] : status === 'weak' ? [c.warnBg, c.warn] : [c.sunken, c.muted];
+  return <T style={[styles.status, { backgroundColor: bg, color: fg }]}>{STATUS_LABEL[status]}</T>;
+}
 
 export default function TemplateEditor() {
   // benchId (development): mark a test-bench sample's boxes; saving writes them to that sample.
@@ -123,6 +129,7 @@ export default function TemplateEditor() {
     /** A built-in scorebook this photo was recognised as, with its boxes lined up to the photo. */
     library: (LibraryMatch & { parts: ReturnType<typeof alignParts> }) | null;
     anchors: ScorebookTemplate['anchors'];
+    lines: TextLine[] | null;
   } | null>(null);
   const [autoPlaced, setAutoPlaced] = useState<{ parts: PartId[]; recognised: string | null } | null>(null);
 
@@ -150,6 +157,16 @@ export default function TemplateEditor() {
     })();
   }, [db, id, uri, benchId]);
 
+  // Save as you go: a reload, crash or accidental back never loses marked boxes.
+  // (An unfinished template shows in the list as needing rows, names and points.)
+  useEffect(() => {
+    if (!tpl || benchId || !tpl.photoUri) return;
+    const timer = setTimeout(() => {
+      void saveTemplate(db, normalizeTemplate(tpl));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [db, tpl, benchId]);
+
   const photo = tpl?.photoUri ?? null;
   useEffect(() => {
     if (photo) Image.getSize(photo, (w, h) => setAspect(w / h), () => setAspect(1.3));
@@ -168,7 +185,7 @@ export default function TemplateEditor() {
       // Development builds log the recognized text, to capture new test fixtures for placement.
       if (__DEV__) lines?.forEach((l) => console.log(`[autoplace-text] ${l.text} @ ${[l.rect.x, l.rect.y, l.rect.w, l.rect.h].map((n) => n.toFixed(3)).join(',')} | ${l.words.map((w) => `${w.text}:${w.rect.x.toFixed(3)},${w.rect.y.toFixed(3)},${w.rect.w.toFixed(3)},${w.rect.h.toFixed(3)}`).join(' ')}`));
       console.log(`[autoplace] ${lines?.length ?? 'no'} text lines; placed ${result?.found.join(', ') || 'nothing'}`);
-      setPlacement({ uri: photo, result, library, anchors: lines ? anchorsForTemplate(lines) : undefined });
+      setPlacement({ uri: photo, result, library, anchors: lines ? anchorsForTemplate(lines) : undefined, lines });
     });
     return () => {
       live = false;
@@ -253,7 +270,7 @@ export default function TemplateEditor() {
                 ...t,
                 enabled: lib.layout.enabled,
                 parts: { ...lib.parts },
-                foulsKind: lib.layout.foulsKind,
+                variants: { ...lib.layout.variants },
                 builtinId: lib.layout.id,
               }));
               setAutoPlaced({ parts: lib.layout.enabled, recognised: lib.layout.name });
@@ -285,7 +302,7 @@ export default function TemplateEditor() {
           width={screenW - EDGE * 2}
           height={Math.round(screenH * 0.36)}
           onRect={(p, r) => update((t) => ({ ...t, parts: { ...t.parts, [p]: isBand(p) ? { x: r.x, w: r.w } : r } }))}
-          onFoulsKind={(k) => update((t) => ({ ...t, foulsKind: k }))}
+          onVariant={(p, v) => update((t) => ({ ...t, variants: { ...t.variants, [p]: v } }))}
           onBack={() => {
             if (step.parts.length > 1 && detail > 0) setDetail(detail - 1);
             else if (stepIndex > 0) enterStep(stepIndex - 1, stepsFor(tpl)[stepIndex - 1].parts.length - 1);
@@ -322,6 +339,16 @@ export default function TemplateEditor() {
             if (i >= 0) enterStep(i, steps[i].parts.indexOf(p));
           }}
           onRect={(p, r) => update((t) => ({ ...t, parts: { ...t.parts, [p]: isBand(p) ? { x: r.x, w: r.w } : r } }))}
+          onPlace={(p, r) =>
+            update((t) => ({
+              ...t,
+              enabled: t.enabled.includes(p) ? t.enabled : [...t.enabled, p],
+              parts: { ...t.parts, [p]: isBand(p) ? { x: r.x, w: r.w } : r },
+            }))
+          }
+          onRemove={(p) => update((t) => ({ ...t, enabled: t.enabled.filter((x) => x !== p), parts: { ...t.parts, [p]: undefined } }))}
+          onVariant={(p, v) => update((t) => ({ ...t, variants: { ...t.variants, [p]: v } }))}
+          lines={current?.lines ?? null}
           onAdd={() => setPhase('pick')}
           onTest={() => setPhase('test')}
           onSave={async () => {
@@ -335,6 +362,7 @@ export default function TemplateEditor() {
         <TestPhase
           tpl={tpl}
           c={c}
+          onRemove={(p) => update((t) => ({ ...t, enabled: t.enabled.filter((x) => x !== p), parts: { ...t.parts, [p]: undefined } }))}
           onFix={(p) => {
             const i = steps.findIndex((s) => s.parts.includes(p));
             if (i >= 0) enterStep(i, steps[i].parts.indexOf(p));
@@ -381,6 +409,96 @@ function Stepper({ phase, c, fraction }: { phase: Phase; c: Colors; fraction: nu
           </T>
         </View>
       ))}
+    </View>
+  );
+}
+
+/** How this book writes a part (e.g. fouls as crossed boxes, a total, or tallies). */
+function VariantPicker({ part, value, onChange, c }: { part: PartId; value?: string; onChange: (v: string) => void; c: Colors }) {
+  const variants = partSpec(part).variants ?? [];
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel={`How ${partSpec(part).name.toLowerCase()} are written`} style={{ gap: 6 }}>
+      <T style={{ fontSize: 13, fontFamily: fonts.bodyBold }}>How does this book write it?</T>
+      {variants.map((v) => {
+        const on = v.id === value;
+        return (
+          <Pressable
+            key={v.id}
+            onPress={() => onChange(v.id)}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: on }}
+            style={[styles.chooserRow, { borderRadius: 12, borderWidth: on ? 2 : 1, borderColor: on ? PART_COLORS[part] : c.border, backgroundColor: c.card, paddingHorizontal: 12 }]}>
+            <View style={{ flex: 1 }}>
+              <T style={{ fontFamily: fonts.bodySemiBold }}>{v.name}</T>
+              <T muted style={{ fontSize: 12.5 }}>{v.sub}</T>
+            </View>
+            <T style={{ color: on ? PART_COLORS[part] : c.muted, fontFamily: fonts.bodyBold }}>{on ? '●' : '○'}</T>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** "What is this box?": the region bank, with the best guesses from nearby printed labels first. */
+function RegionChooser({
+  rect,
+  lines,
+  tpl,
+  c,
+  onPick,
+  onCancel,
+}: {
+  rect: NormRect;
+  lines: TextLine[] | null;
+  tpl: ScorebookTemplate;
+  c: Colors;
+  onPick: (p: PartId) => void;
+  onCancel: () => void;
+}) {
+  const hasRows = !!tpl.parts.rows;
+  const suggested = lines ? suggestParts(rect, lines).slice(0, 2) : [];
+  const row = (p: PartId, hint?: string) => {
+    const spec = partSpec(p);
+    const placed = !!tpl.parts[p] && tpl.enabled.includes(p);
+    const blocked = spec.shape === 'band' && !hasRows;
+    return (
+      <Pressable
+        key={`${hint ?? ''}${p}`}
+        disabled={blocked}
+        onPress={() => onPick(p)}
+        accessibilityRole="button"
+        accessibilityLabel={spec.name}
+        style={[styles.chooserRow, blocked && { opacity: 0.4 }]}>
+        <View style={[styles.swatchSmall, { backgroundColor: PART_COLORS[p] }]} />
+        <View style={{ flex: 1 }}>
+          {hint && <T style={{ fontSize: 11.5, fontFamily: fonts.bodyBold, color: c.accent }}>{hint}</T>}
+          <T style={{ fontFamily: fonts.bodySemiBold }}>{spec.name}</T>
+          <T muted style={{ fontSize: 12.5 }}>
+            {blocked ? 'Mark Player rows first: this is a column of the player table.' : placed ? 'Already placed: picking it moves it here.' : spec.short}
+          </T>
+        </View>
+        <StatusChip status={spec.status} c={c} />
+      </Pressable>
+    );
+  };
+  return (
+    <View style={[base.content, { paddingTop: 0 }]}>
+      <View style={[styles.chooser, { backgroundColor: c.card, borderColor: c.border }]}>
+        <View style={[base.row, { justifyContent: 'space-between' }]}>
+          <T style={base.h2}>What is this box?</T>
+          <Pressable onPress={onCancel} accessibilityRole="button" hitSlop={8}>
+            <T style={{ color: c.accent, fontFamily: fonts.bodySemiBold }}>Cancel</T>
+          </Pressable>
+        </View>
+        {suggested.map((p) => row(p, 'SUGGESTED FROM THE PRINTED LABEL'))}
+        {PART_GROUPS.map((g) => (
+          <View key={g.group} style={{ gap: 2 }}>
+            <T style={[styles.groupTitle, { color: c.muted, marginTop: 6 }]}>{g.title}</T>
+            {PARTS.filter((p) => p.group === g.group).map((p) => row(p.id))}
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -502,37 +620,47 @@ function PickPhase({
     <>
       <ScrollView contentContainerStyle={[base.content, { gap: space.sm }]}>
         <T style={base.h1}>What should Brume read?</T>
-        <T muted>{'Turn off anything your book doesn’t have. Each part you mark adds about a second to every scan.'}</T>
-        {GROUPS.map((g) => (
-          <View key={g.group} style={{ gap: 6, marginTop: space.sm }}>
-            <T style={[styles.groupTitle, { color: c.muted }]}>{g.title}</T>
-            <View style={[styles.list, { backgroundColor: c.card, borderColor: c.border }]}>
-              {PARTS.filter((p) => p.group === g.group).map((p, i) => {
-                const required = REQUIRED_PARTS.includes(p.id);
-                const on = tpl.enabled.includes(p.id);
-                return (
-                  <View key={p.id} style={[styles.pickRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}>
-                    <View style={[styles.swatch, { backgroundColor: PART_COLORS[p.id] }]} />
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <T style={{ fontFamily: fonts.bodySemiBold }}>{p.name}</T>
-                      <T muted style={{ fontSize: 13, lineHeight: 18 }}>{p.short}</T>
+        <T muted>{'Turn off anything your book doesn\u2019t have. Each part adds about a second to every scan. The label shows how well Brume reads it today.'}</T>
+        {PART_GROUPS.map((g) => {
+          const ready = PARTS.filter((p) => p.group === g.group && p.status !== 'planned');
+          const later = PARTS.filter((p) => p.group === g.group && p.status === 'planned');
+          return (
+            <View key={g.group} style={{ gap: 6, marginTop: space.sm }}>
+              <T style={[styles.groupTitle, { color: c.muted }]}>{g.title}</T>
+              <View style={[styles.list, { backgroundColor: c.card, borderColor: c.border }]}>
+                {ready.map((p, i) => {
+                  const required = REQUIRED_PARTS.includes(p.id);
+                  const on = tpl.enabled.includes(p.id);
+                  return (
+                    <View key={p.id} style={[styles.pickRow, i > 0 && { borderTopWidth: 1, borderTopColor: c.border }]}>
+                      <View style={[styles.swatch, { backgroundColor: PART_COLORS[p.id] }]} />
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <View style={[base.row, { gap: 6 }]}>
+                          <T style={{ fontFamily: fonts.bodySemiBold }}>{p.name}</T>
+                          <StatusChip status={p.status} c={c} />
+                        </View>
+                        <T muted style={{ fontSize: 13, lineHeight: 18 }}>{p.short}</T>
+                      </View>
+                      {required ? (
+                        <T muted style={base.small}>Always</T>
+                      ) : (
+                        <Switch
+                          value={on}
+                          onValueChange={(v) => onToggle(p.id, v)}
+                          accessibilityLabel={p.name}
+                          trackColor={{ true: c.accent, false: c.border }}
+                        />
+                      )}
                     </View>
-                    {required ? (
-                      <T muted style={base.small}>Always</T>
-                    ) : (
-                      <Switch
-                        value={on}
-                        onValueChange={(v) => onToggle(p.id, v)}
-                        accessibilityLabel={p.name}
-                        trackColor={{ true: c.accent, false: c.border }}
-                      />
-                    )}
-                  </View>
-                );
-              })}
+                  );
+                })}
+              </View>
+              {later.length > 0 && (
+                <T muted style={{ fontSize: 12.5, lineHeight: 18 }}>{`Coming soon: ${later.map((p) => p.name).join(', ')}. You can already box these on Review; they\u2019re kept with the template.`}</T>
+              )}
             </View>
-          </View>
-        ))}
+          );
+        })}
       </ScrollView>
       <Footer>
         <Button title={placing ? 'Finding the printed labels…' : 'Place the boxes for me'} onPress={onAuto} disabled={placing} />
@@ -564,7 +692,7 @@ function MarkPhase({
   width,
   height,
   onRect,
-  onFoulsKind,
+  onVariant,
   onBack,
   onSkip,
   onNext,
@@ -581,7 +709,7 @@ function MarkPhase({
   width: number;
   height: number;
   onRect: (p: PartId, r: NormRect) => void;
-  onFoulsKind: (k: ScorebookTemplate['foulsKind']) => void;
+  onVariant: (p: PartId, v: string) => void;
   onBack: () => void;
   onSkip: (p: PartId) => void;
   onNext: () => void;
@@ -640,26 +768,10 @@ function MarkPhase({
               ))}
             </View>
           )}
-          {part === 'fouls' && (
-            <View style={[styles.segment, { backgroundColor: c.sunken }]}>
-              {(
-                [
-                  ['boxes', 'Crossed-off boxes'],
-                  ['total', 'A written total (F)'],
-                ] as const
-              ).map(([k, label]) => (
-                <Pressable
-                  key={k}
-                  onPress={() => onFoulsKind(k)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: tpl.foulsKind === k }}
-                  style={[styles.segmentItem, tpl.foulsKind === k && { backgroundColor: c.card }]}>
-                  <T style={{ fontSize: 14, fontFamily: fonts.bodySemiBold, color: tpl.foulsKind === k ? c.text : c.muted }}>{label}</T>
-                </Pressable>
-              ))}
-            </View>
+          {spec.variants && (
+            <VariantPicker part={part} value={variantOf(tpl, part)} onChange={(v) => onVariant(part, v)} c={c} />
           )}
-          <T style={{ fontSize: 15, lineHeight: 21 }}>{part === 'fouls' && tpl.foulsKind === 'total' ? 'Drag across the F total column only.' : spec.instruction}</T>
+          <T style={{ fontSize: 15, lineHeight: 21 }}>{part === 'fouls' && variantOf(tpl, 'fouls') === 'total' ? 'Drag across the F total column only.' : spec.instruction}</T>
         </View>
 
         <View style={styles.markerWrap}>
@@ -735,6 +847,10 @@ function ReviewPhase({
   onTest,
   onSave,
   onRect,
+  onPlace,
+  onRemove,
+  onVariant,
+  lines,
 }: {
   autoPlaced: { parts: PartId[]; recognised: string | null } | null;
   tpl: ScorebookTemplate;
@@ -745,11 +861,18 @@ function ReviewPhase({
   height: number;
   onEdit: (p: PartId) => void;
   onRect: (p: PartId, r: NormRect) => void;
+  onPlace: (p: PartId, r: NormRect) => void;
+  onRemove: (p: PartId) => void;
+  onVariant: (p: PartId, v: string) => void;
+  lines: TextLine[] | null;
   onAdd: () => void;
   onTest: () => void;
   onSave: () => void;
 }) {
   const marked = markedParts(tpl);
+  // Adding a region: draw a box, then say what it is (the region bank).
+  const [adding, setAdding] = useState<NormRect | null>(null);
+  const [choosing, setChoosing] = useState(false);
   const usable = isUsable(tpl);
   // The box being adjusted in place; tap a box (or its name below) to pick it.
   const [selected, setSelected] = useState<PartId | null>(null);
@@ -787,26 +910,81 @@ function ReviewPhase({
           width={width}
           height={height}
           shapes={marked
-            .filter((p) => p !== sel)
+            .filter((p) => adding || p !== sel)
             .map((p) => ({ id: p, rect: fullRect(tpl, p)!, color: PART_COLORS[p], label: partSpec(p).name }))}
-          active={sel ? { id: sel, rect: fullRect(tpl, sel)!, color: PART_COLORS[sel], label: partSpec(sel).name } : null}
-          band={sel && isBand(sel) ? { y: rows.y, h: rows.h } : null}
-          onChange={sel ? (r) => onRect(sel, r) : undefined}
-          onTapShape={(id) => setSelected(id as PartId)}
-          allowDraw={false}
+          active={
+            adding
+              ? { id: 'new', rect: adding, color: c.text }
+              : sel
+                ? { id: sel, rect: fullRect(tpl, sel)!, color: PART_COLORS[sel], label: partSpec(sel).name }
+                : null
+          }
+          band={!adding && sel && isBand(sel) ? { y: rows.y, h: rows.h } : null}
+          onChange={adding ? (r) => setAdding(r) : sel ? (r) => onRect(sel, r) : undefined}
+          onTapShape={adding ? undefined : (id) => setSelected(id as PartId)}
+          allowDraw={!!adding}
           showLabels
         />
         </View>
-        {sel && (
+        {adding && !choosing && (
+          <View style={[base.content, { gap: 8 }]}>
+            <T style={{ fontFamily: fonts.bodySemiBold }}>Draw or drag the box over the part, then say what it is.</T>
+            <View style={base.row}>
+              <View style={{ flex: 1 }}>
+                <Button title="Cancel" kind="secondary" onPress={() => setAdding(null)} />
+              </View>
+              <View style={{ flex: 2 }}>
+                <Button title="What is this box?" onPress={() => setChoosing(true)} />
+              </View>
+            </View>
+          </View>
+        )}
+        {adding && choosing && (
+          <RegionChooser
+            rect={adding}
+            lines={lines}
+            tpl={tpl}
+            c={c}
+            onCancel={() => {
+              setChoosing(false);
+              setAdding(null);
+            }}
+            onPick={(p) => {
+              // A column of the player table keeps the drawn left edge and width; it spans the rows.
+              onPlace(p, adding);
+              setChoosing(false);
+              setAdding(null);
+              setSelected(p);
+            }}
+          />
+        )}
+        {!adding && sel && (
           <View style={[base.content, base.row, styles.editing, { borderColor: PART_COLORS[sel] }]}>
             <View style={[styles.swatchSmall, { backgroundColor: PART_COLORS[sel] }]} />
             <T style={{ flex: 1, fontFamily: fonts.bodySemiBold }}>{`Adjusting ${partSpec(sel).name.toLowerCase()}`}</T>
             <Pressable onPress={() => onEdit(sel)} accessibilityRole="button" hitSlop={8} style={styles.editingAction}>
               <T style={{ color: c.accent, fontFamily: fonts.bodySemiBold }}>Instructions</T>
             </Pressable>
+            {!REQUIRED_PARTS.includes(sel) && (
+              <Pressable
+                onPress={() => {
+                  onRemove(sel);
+                  setSelected(null);
+                }}
+                accessibilityRole="button"
+                hitSlop={8}
+                style={styles.editingAction}>
+                <T style={{ color: c.error, fontFamily: fonts.bodySemiBold }}>Remove</T>
+              </Pressable>
+            )}
             <Pressable onPress={() => setSelected(null)} accessibilityRole="button" hitSlop={8} style={styles.editingAction}>
               <T style={{ color: c.accent, fontFamily: fonts.bodyBold }}>Done</T>
             </Pressable>
+          </View>
+        )}
+        {!adding && sel && partSpec(sel).variants && (
+          <View style={[base.content, { paddingTop: 6 }]}>
+            <VariantPicker part={sel} value={variantOf(tpl, sel)} onChange={(v) => onVariant(sel, v)} c={c} />
           </View>
         )}
         <View style={[base.content, styles.grid]}>
@@ -819,15 +997,27 @@ function ReviewPhase({
               accessibilityLabel={`Adjust ${partSpec(p).name}`}
               style={[styles.gridItem, { backgroundColor: c.card, borderColor: p === sel ? PART_COLORS[p] : c.border, borderWidth: p === sel ? 2 : 1 }]}>
               <View style={[styles.swatchSmall, { backgroundColor: PART_COLORS[p] }]} />
-              <T style={{ flex: 1, fontSize: 14, fontFamily: fonts.bodySemiBold }}>{partSpec(p).name}</T>
-              <T muted>›</T>
+              <View style={{ flex: 1 }}>
+                <T style={{ fontSize: 14, fontFamily: fonts.bodySemiBold }}>{partSpec(p).name}</T>
+                {partSpec(p).variants && (
+                  <T muted style={{ fontSize: 12 }}>{partSpec(p).variants!.find((v) => v.id === variantOf(tpl, p))?.name ?? ''}</T>
+                )}
+              </View>
+              <StatusChip status={partSpec(p).status} c={c} />
             </Pressable>
           ))}
           <Pressable
-            onPress={onAdd}
+            onPress={() => {
+              setSelected(null);
+              setChoosing(false);
+              setAdding({ x: 0.35, y: 0.4, w: 0.25, h: 0.08 });
+            }}
             accessibilityRole="button"
             style={[styles.gridItem, { borderColor: c.accent, borderStyle: 'dashed' }]}>
-            <T style={{ flex: 1, fontSize: 14, fontFamily: fonts.bodySemiBold, color: c.accent }}>+ Add or remove parts</T>
+            <T style={{ flex: 1, fontSize: 14, fontFamily: fonts.bodySemiBold, color: c.accent }}>+ Add a region</T>
+          </Pressable>
+          <Pressable onPress={onAdd} accessibilityRole="button" style={[styles.gridItem, { borderColor: c.border }]}>
+            <T style={{ flex: 1, fontSize: 14, fontFamily: fonts.bodySemiBold, color: c.accent }}>Choose from the list</T>
           </Pressable>
         </View>
         {!usable && (
@@ -856,23 +1046,32 @@ function TestPhase({
   tpl,
   c,
   onFix,
+  onRemove,
   onBack,
   onSave,
 }: {
   tpl: ScorebookTemplate;
   c: Colors;
   onFix: (p: PartId) => void;
+  /** Drop a part that can't be read from the template, without re-reading. */
+  onRemove: (p: PartId) => void;
   onBack: () => void;
   onSave: (result: NonNullable<ScorebookTemplate['test']>) => void;
 }) {
   const db = useSQLiteContext();
-  const [progress, setProgress] = useState<{ fraction: number; text: string } | null>({ fraction: 0, text: 'Starting…' });
+  const [progress, setProgress] = useState<{ fraction: number; text: string; rect?: NormRect | null } | null>({ fraction: 0, text: 'Starting…' });
+  const { width: screenW, height: screenH } = useWindowDimensions();
   const [checks, setChecks] = useState<PartCheck[] | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
+  // Read with the template as it was when this screen opened: removing a part
+  // afterwards drops its line here instead of starting the read again.
+  const [readWith] = useState(tpl);
+  const [removed, setRemoved] = useState<PartId[]>([]);
 
   useEffect(() => {
+    const tpl = readWith;
     const ctrl = new AbortController();
     abort.current = ctrl;
     (async () => {
@@ -885,7 +1084,11 @@ function TestPhase({
           onModelLoad: (f) => setProgress({ fraction: f * 0.1, text: 'Loading the reading model…' }),
           onProgress: (p) => {
             const label = doc.regions.find((r) => r.id === p.regionId)?.label ?? '';
-            setProgress({ fraction: (p.done + (p.phase === 'writing' ? 0.6 : 0.1)) / Math.max(1, p.total), text: label ? `Reading ${label.toLowerCase()}…` : 'Finishing…' });
+            setProgress({
+              fraction: (p.done + (p.phase === 'writing' ? 0.6 : 0.1)) / Math.max(1, p.total),
+              text: label ? `Reading ${label.toLowerCase()}…` : 'Finishing…',
+              rect: p.phase === 'finished' ? null : progressRect(doc, p),
+            });
           },
         });
         for (const r of run.results) console.log(`[template-test] raw ${r.regionId}#${r.tileIndex}: ${r.raw.replace(/\s+/g, ' ').slice(0, 800)}`);
@@ -903,11 +1106,14 @@ function TestPhase({
       }
     })();
     return () => ctrl.abort();
-  }, [db, tpl]);
+  }, [db, readWith]);
 
   if (progress) {
     return (
       <View style={[base.content, { flex: 1, justifyContent: 'center', gap: space.md }]}>
+        {readWith.photoUri && (
+          <ReadingView uri={readWith.photoUri} rect={progress.rect ?? null} width={screenW - space.lg * 2} height={Math.round(screenH * 0.42)} />
+        )}
         <T style={base.h2}>{progress.text}</T>
         <ProgressBar fraction={progress.fraction} />
         <T muted>Reading your photo with this template. Nothing is saved as a game.</T>
@@ -933,18 +1139,42 @@ function TestPhase({
     );
   }
 
-  const problems = checks.filter((k) => !k.ok);
+  const shown = checks.filter((k) => !removed.includes(k.part));
+  const problems = shown.filter((k) => !k.ok);
   return (
     <>
       <ScrollView contentContainerStyle={[base.content, { gap: space.md }]}>
         <T style={base.h1}>{'Here’s what Brume read'}</T>
         <View style={[base.row, { gap: 8, flexWrap: 'wrap' }]}>
-          <T style={[styles.pill, { backgroundColor: c.okBg, color: c.ok }]}>{`${checks.length - problems.length} look right`}</T>
+          <T style={[styles.pill, { backgroundColor: c.okBg, color: c.ok }]}>{`${shown.length - problems.length} look right`}</T>
           {problems.length > 0 && <T style={[styles.pill, { backgroundColor: c.warnBg, color: c.warn }]}>{`${problems.length} to check`}</T>}
           <T style={[styles.pill, { backgroundColor: c.sunken, color: c.muted, fontFamily: fonts.mono }]}>{`${seconds} s`}</T>
         </View>
+        {problems.map((k) => (
+          <Card key={k.part} style={{ backgroundColor: c.warnBg, borderColor: c.warnLine }}>
+            <T style={{ color: c.warn, fontFamily: fonts.bodyBold }}>{`${partSpec(k.part).name}: ${k.value}`}</T>
+            <T style={{ fontSize: 14, lineHeight: 20 }}>{k.note ?? ''}</T>
+            <View style={[base.row, { gap: 20 }]}>
+              <Pressable onPress={() => onFix(k.part)} accessibilityRole="button" style={{ minHeight: 40, justifyContent: 'center' }}>
+                <T style={{ color: c.accent, fontFamily: fonts.bodyBold }}>{`Redo ${partSpec(k.part).name.toLowerCase()}`}</T>
+              </Pressable>
+              {!REQUIRED_PARTS.includes(k.part) && (
+                <Pressable
+                  onPress={() => {
+                    onRemove(k.part);
+                    setRemoved((r) => [...r, k.part]);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityHint="Brume stops reading this part on this scorebook"
+                  style={{ minHeight: 40, justifyContent: 'center' }}>
+                  <T style={{ color: c.error, fontFamily: fonts.bodySemiBold }}>Remove this part</T>
+                </Pressable>
+              )}
+            </View>
+          </Card>
+        ))}
         <View style={[styles.list, { backgroundColor: c.card, borderColor: c.border }]}>
-          {checks.map((k, i) => (
+          {shown.map((k, i) => (
             <Pressable
               key={k.part}
               onPress={() => onFix(k.part)}
@@ -958,15 +1188,6 @@ function TestPhase({
             </Pressable>
           ))}
         </View>
-        {problems.map((k) => (
-          <Card key={k.part} style={{ backgroundColor: c.warnBg, borderColor: c.warnLine }}>
-            <T style={{ color: c.warn, fontFamily: fonts.bodyBold }}>{`${partSpec(k.part).name}: ${k.value}`}</T>
-            <T style={{ fontSize: 14, lineHeight: 20 }}>{k.note ?? ''}</T>
-            <Pressable onPress={() => onFix(k.part)} accessibilityRole="button" style={{ minHeight: 36, justifyContent: 'center' }}>
-              <T style={{ color: c.accent, fontFamily: fonts.bodyBold }}>{`Redo ${partSpec(k.part).name.toLowerCase()}`}</T>
-            </Pressable>
-          </Card>
-        ))}
       </ScrollView>
       <Footer>
         <View style={base.row}>
@@ -976,7 +1197,7 @@ function TestPhase({
           <View style={{ flex: 2 }}>
             <Button
               title="Save template"
-              onPress={() => onSave({ at: Date.now(), seconds, checks: checks.length, problems: problems.length })}
+              onPress={() => onSave({ at: Date.now(), seconds, checks: shown.length, problems: problems.length })}
             />
           </View>
         </View>
@@ -989,6 +1210,9 @@ const styles = StyleSheet.create({
   stepper: { flexDirection: 'row', gap: 6, paddingHorizontal: space.lg, paddingTop: space.sm },
   bar: { height: 6, borderRadius: 3, overflow: 'hidden' },
   why: { borderRadius: 14, padding: 14, gap: 4 },
+  status: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: 999, overflow: 'hidden', fontSize: 11, fontFamily: fonts.bodyBold },
+  chooser: { borderRadius: 16, borderWidth: 1, padding: 12, gap: 8, marginTop: space.sm },
+  chooserRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, paddingHorizontal: 4 },
   editing: { marginTop: space.sm, marginHorizontal: space.lg, paddingVertical: 6, paddingHorizontal: 12, borderWidth: 1.5, borderRadius: 12, gap: 10 },
   editingAction: { minHeight: 36, justifyContent: 'center' },
   markerWrap: { marginHorizontal: EDGE, borderRadius: 12, overflow: 'hidden' },

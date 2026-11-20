@@ -1,12 +1,12 @@
-import type { ExtractionProgress } from '@brume/ocr-engine';
+import type { ExtractionProgress, NormRect } from '@brume/ocr-engine';
 import { router, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Image, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
-import { READ_IN_PROGRESS_KEY, clearSetting, getActiveTemplate, saveGame, setSetting } from '@/db';
+import { READ_IN_PROGRESS_KEY, clearSetting, getActiveTemplate, listTemplates, saveGame, setSetting } from '@/db';
 import {
   SCOREBOOK_PAGE_TEMPLATE,
   applyTemplate,
@@ -26,6 +26,7 @@ import { extract, getActiveModelId } from '@/engine/host';
 import { keepImage, newId } from '@/lib/files';
 import { recognizePageText } from '../../modules/page-text';
 import { Button, Card, ProgressBar, T } from '@/ui/components';
+import { ReadingView, progressRect } from '@/ui/ReadingView';
 import { base, space, useColors } from '@/ui/theme';
 
 const REGION_LABELS: Record<string, string> = {
@@ -36,7 +37,8 @@ const REGION_LABELS: Record<string, string> = {
   quarters: 'score by quarter',
 };
 
-type Status = { text: string; detail: string; fraction: number; startedAt: number } | null;
+/** uri / rect: the page being read and the part of it being read now, for the animation. */
+type Status = { text: string; detail: string; fraction: number; startedAt: number; uri?: string; rect?: NormRect | null } | null;
 
 const KEEP_AWAKE_TAG = 'brume-reading';
 
@@ -72,14 +74,17 @@ export default function Scan() {
   const c = useColors();
   const [pages, setPages] = useState<Record<Side, string | null>>({ home: null, away: null });
   const [layout, setLayout] = useState<ScorebookTemplate | null>(null);
+  const [templateCount, setTemplateCount] = useState(0);
 
   // Re-read after returning from the template screens.
   useFocusEffect(
     useCallback(() => {
       getActiveTemplate(db).then((t) => setLayout(t && isUsable(t) ? t : null));
+      listTemplates(db).then((all) => setTemplateCount(all.length));
     }, [db]),
   );
   const [status, setStatus] = useState<Status>(null);
+  const { width: screenW, height: screenH } = useWindowDimensions();
   const elapsed = useElapsed(status?.startedAt ?? null);
   const abort = useRef<AbortController | null>(null);
 
@@ -133,7 +138,7 @@ export default function Scan() {
         const run = await extract(modelId, uri, template, {
           signal,
           onModelLoad: (f) =>
-            setStatus({ text: 'Loading the reading model…', detail: '', fraction: f, startedAt }),
+            setStatus({ text: 'Loading the reading model…', detail: '', fraction: f, startedAt, uri, rect: null }),
           onProgress: (p) => {
             // One device-log line per crop: the only way to time a run on a phone.
             if (p.phase !== 'writing') {
@@ -143,6 +148,8 @@ export default function Scan() {
               ...describeProgress(side, p),
               fraction: (i + (p.done + cropFraction(p)) / Math.max(1, p.total)) / sides.length,
               startedAt,
+              uri,
+              rect: p.phase === 'finished' ? null : progressRect(template, p),
             });
           },
         });
@@ -205,6 +212,7 @@ export default function Scan() {
   if (status) {
     return (
       <View style={[base.screen, base.content, { backgroundColor: c.bg, justifyContent: 'center' }]}>
+        {status.uri && <ReadingView uri={status.uri} rect={status.rect ?? null} width={screenW - space.lg * 2} height={Math.round(screenH * 0.42)} />}
         <T style={base.h2}>{status.text}</T>
         <ProgressBar fraction={status.fraction} />
         <View style={[base.row, { justifyContent: 'space-between' }]}>
@@ -240,20 +248,25 @@ export default function Scan() {
         <Card>
           <View style={[base.row, { justifyContent: 'space-between' }]}>
             <T style={base.h2}>Template</T>
-            <T muted>{layout ? layout.name : 'None'}</T>
+            <T muted>{layout ? layout.name : templateCount ? 'Not ready' : 'None'}</T>
           </View>
           <T muted>
             {layout
               ? `Brume reads the ${markedParts(layout).length} parts you marked on this kind of scorebook.`
-              : 'Show Brume where each part of your scorebook is, once per kind of book. Reading is much more accurate afterwards.'}
+              : templateCount
+                ? 'None of your templates can read pages yet: each needs player rows, names and points marked. Finish one, or make one from this photo.'
+                : 'Show Brume where each part of your scorebook is, once per kind of book. Reading is much more accurate afterwards.'}
           </T>
           {layout ? (
             <Button title="Change template" kind="secondary" onPress={() => router.push('/templates')} />
           ) : (
+            <>
+            {templateCount > 0 && <Button title="Finish a template" kind="secondary" onPress={() => router.push('/templates')} />}
             <Button
               title="Make a template from this photo"
               onPress={() => router.push({ pathname: '/template-editor', params: { uri: (pages.home ?? pages.away)! } })}
             />
+            </>
           )}
         </Card>
       )}
