@@ -1,6 +1,8 @@
 import type { NormRect, TextLine } from '@brume/ocr-engine';
 
 import { LIBRARY, alignParts, matchLibrary, templateForPhoto } from '../library';
+import { applyTemplate, migrateTemplate, newTemplate } from '../scorebook';
+import { SCOREBOOK_PAGE_TEMPLATE } from '../template';
 import champion from './fixtures/nfhs-champion-blank-ocr.json';
 import stars from './fixtures/stars-ocr.json';
 
@@ -32,7 +34,7 @@ describe('template library', () => {
 describe('templateForPhoto', () => {
   const mine = {
     ...LIBRARY[0],
-    version: 2 as const,
+    version: 3 as const,
     id: 'mine',
     name: 'Mine',
     photoUri: null,
@@ -58,5 +60,25 @@ describe('templateForPhoto', () => {
     expect(r.source).toBe('library');
     expect(r.template!.builtinId).toBe('nfhs-champion');
     expect(templateForPhoto(null, stars).source).toBe('none');
+  });
+});
+
+describe('template migration', () => {
+  it('turns a v2 template (one foulsKind) into v3 variants', () => {
+    const v2 = { version: 2, id: 'a', name: 'A', enabled: ['rows'], parts: {}, foulsKind: 'total', photoUri: null, test: null, createdAt: 0, updatedAt: 0 };
+    const t = migrateTemplate(v2)!;
+    expect(t.version).toBe(3);
+    expect(t.variants).toEqual({ fouls: 'total' });
+    expect('foulsKind' in t).toBe(false);
+    expect(migrateTemplate({ version: 1 })).toBeNull();
+  });
+
+  it('leaves planned region types out of the read but keeps them in the template', () => {
+    const t = { ...newTemplate('p', 'P', null, 0), enabled: ['rows', 'names', 'points', 'runningScore'] as const };
+    const tpl = { ...t, enabled: [...t.enabled], parts: { rows: { x: 0, y: 0.3, w: 1, h: 0.6 }, names: { x: 0, w: 0.2 }, points: { x: 0.9, w: 0.05 }, runningScore: { x: 0, y: 0.1, w: 1, h: 0.1 } } };
+    const ids = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, tpl).regions.map((r) => r.id);
+    expect(ids).toContain('players');
+    expect(ids.some((id) => id.includes('running'))).toBe(false);
+    expect(tpl.parts.runningScore).toBeDefined();
   });
 });

@@ -324,7 +324,7 @@ describe('scorebook templates', () => {
   });
 
   it('asks for the F total instead when the book writes one', () => {
-    const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, { ...marked(), foulsKind: 'total' });
+    const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, { ...marked(), variants: { fouls: 'total' } });
     expect(t.regions.find((r) => r.id === REGION.fouls)!.columns?.[1].label).toBe('fouls (F total)');
   });
 
@@ -468,5 +468,15 @@ describe('dropFinalFromPeriods', () => {
     expect(dropFinalFromPeriods([15, 26, 39, 50, null, 50], 50)).toEqual([15, 26, 39, 50]);
     expect(dropFinalFromPeriods([15, 11, 13, 11, 0], 50)).toEqual([15, 11, 13, 11]);
     expect(dropFinalFromPeriods([15, 11, 13, 11, 6], 56)).toEqual([15, 11, 13, 11, 6]);
+  });
+});
+
+describe('mergePlayers across strip edges', () => {
+  it('keeps the whole copy of a row cut off at the bottom of a strip', () => {
+    const cut = player({ number: '10', name: 'D...', points: 3 });
+    const whole = player({ number: '10', name: 'Drexler', points: 2 });
+    expect(mergePlayers([cut, whole], new Set([cut]))[0].points).toBe(2);
+    // A truncated name counts against a copy even without the edge flag.
+    expect(mergePlayers([cut, whole])[0].name).toBe('Drexler');
   });
 });

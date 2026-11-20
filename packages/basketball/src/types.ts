@@ -19,6 +19,8 @@ export interface TeamSheet {
   timeoutsUsed: number | null;
   /** Optional: games saved before templates lack these. */
   coach?: string | null;
+  /** Half-time score, when the book has its own box for it. */
+  halfScore?: number | null;
   /** Team fouls per half (or quarter), in book order. */
   teamFouls?: (number | null)[];
   players: PlayerLine[];

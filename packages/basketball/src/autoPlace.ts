@@ -1,6 +1,6 @@
 import type { NormRect, TextLine, TextWord } from '@brume/ocr-engine';
 
-import type { Band, PartId } from './scorebook';
+import { PARTS, type Band, type PartId, type PartSpec } from './scorebook';
 
 /**
  * Guess where each template part is from a page's printed labels (TEAM:, COACH:,
@@ -186,4 +186,36 @@ export function placeParts(lines: TextLine[]): Placement {
   }
 
   return { parts, found };
+}
+
+/**
+ * Region types a box might be, best first, from the printed words in or just
+ * around it (a column's heading sits above it; a header field's label to its left).
+ * Used to suggest a meaning when someone draws a new box.
+ */
+export function suggestParts(rect: NormRect, lines: TextLine[], catalog: PartSpec[] = PARTS): PartId[] {
+  const words: TextWord[] = lines.flatMap((l) => (l.words.length ? l.words : [{ text: l.text, rect: l.rect }]));
+  const tall = rect.h > 0.15;
+  const zone = {
+    x0: rect.x - (tall ? 0.01 : 0.15),
+    x1: rect.x + rect.w + 0.01,
+    y0: rect.y - (tall ? 0.06 : 0.02),
+    y1: rect.y + (tall ? Math.min(rect.h, 0.04) : rect.h + 0.01),
+  };
+  const near = words.filter((w) => {
+    const x = w.rect.x + w.rect.w / 2;
+    const y = w.rect.y + w.rect.h / 2;
+    return x >= zone.x0 && x <= zone.x1 && y >= zone.y0 && y <= zone.y1;
+  });
+  const score = new Map<PartId, number>();
+  for (const w of near) {
+    const t = norm(w.text).replace(/[.:]/g, '');
+    for (const p of catalog) {
+      if (!p.labels.includes(t)) continue;
+      // A tall box is a column of the player table; a short one is a box.
+      const shapeFit = (p.shape === 'band') === tall ? 2 : 0.5;
+      score.set(p.id, (score.get(p.id) ?? 0) + shapeFit);
+    }
+  }
+  return [...score.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }

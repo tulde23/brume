@@ -20,7 +20,7 @@ export interface BuiltinLayout {
   anchors: Anchor[];
   enabled: PartId[];
   parts: Partial<Record<PartId, NormRect | Band>>;
-  foulsKind: ScorebookTemplate['foulsKind'];
+  variants: ScorebookTemplate['variants'];
 }
 
 export const LIBRARY: BuiltinLayout[] = [
@@ -44,7 +44,7 @@ export const LIBRARY: BuiltinLayout[] = [
       timeouts: { x: 0.048, y: 0.806, w: 0.273, h: 0.022 },
       teamFouls: { x: 0.321, y: 0.793, w: 0.437, h: 0.014 },
     },
-    foulsKind: 'boxes',
+    variants: { fouls: 'boxes' },
   },
   {
     id: 'nfhs-scoreright',
@@ -64,7 +64,7 @@ export const LIBRARY: BuiltinLayout[] = [
       location: { x: 0.183, y: 0.068, w: 0.126, h: 0.022 },
       timeouts: { x: 0.644, y: 0.028, w: 0.194, h: 0.107 },
     },
-    foulsKind: 'boxes',
+    variants: { fouls: 'boxes' },
   },
 ];
 
@@ -146,12 +146,12 @@ export function templateForPhoto(
   const now = Date.now();
   return {
     template: {
-      version: 2,
+      version: 3,
       id: `builtin-${lib.layout.id}`,
       name: lib.layout.name,
       enabled: lib.layout.enabled,
       parts: alignParts(lib.layout.parts, lib.match),
-      foulsKind: lib.layout.foulsKind,
+      variants: lib.layout.variants,
       photoUri: null,
       test: null,
       builtinId: lib.layout.id,

@@ -1,5 +1,5 @@
 import type { PageReading } from './assemble';
-import { markedParts, type PartId, type ScorebookTemplate } from './scorebook';
+import { markedParts, partSpec, type PartId, type ScorebookTemplate } from './scorebook';
 
 export interface PartCheck {
   part: PartId;
@@ -23,8 +23,24 @@ export function templateChecks(t: ScorebookTemplate, page: PageReading): PartChe
   const text = (part: PartId, v: string | null | undefined, missing: string): PartCheck =>
     v ? { part, value: v, ok: true } : { part, value: 'Not read', ok: false, note: missing };
 
-  return markedParts(t).map((part): PartCheck => {
+  return markedParts(t)
+    .filter((part) => partSpec(part).status !== 'planned')
+    .map((part): PartCheck => {
     switch (part) {
+      case 'opponent':
+        return text(part, page.opponent, 'Box just the handwritten name.');
+      case 'finalScore':
+        return final !== null
+          ? { part, value: String(final), ok: true }
+          : { part, value: 'Not read', ok: false, note: 'Box just the final score.' };
+      case 'halfScore': {
+        const h = team.halfScore ?? null;
+        const q = team.periodScores;
+        if (h === null) return { part, value: 'Not read', ok: false, note: 'Box just the half-time score.' };
+        if (q[0] !== null && q[1] !== null && q[0] + q[1] !== h)
+          return { part, value: `${h}`, ok: false, note: `Q1 + Q2 make ${q[0] + q[1]}, not ${h}.` };
+        return { part, value: String(h), ok: true };
+      }
       case 'rows':
         return players.length
           ? { part, value: `${players.length} players found`, ok: true }
@@ -59,6 +75,13 @@ export function templateChecks(t: ScorebookTemplate, page: PageReading): PartChe
       }
       case 'fouls': {
         const unclear = players.filter((p) => p.fouls === null).length;
+        if (players.length >= 5 && players.every((p) => p.fouls === 0))
+          return {
+            part,
+            value: 'all 0',
+            ok: false,
+            note: 'Every player reads 0 fouls, which almost never happens: crossed-off boxes were probably missed. Counting marks isn\u2019t reliable yet; a written F total reads better.',
+          };
         return unclear === 0
           ? { part, value: `${players.length} read`, ok: true }
           : {
@@ -85,6 +108,8 @@ export function templateChecks(t: ScorebookTemplate, page: PageReading): PartChe
           : { part, value: `${shown} ≠ ${final}`, ok: false, note: 'Quarters don’t add up to the final. Check the box covers every quarter.' };
       }
       case 'timeouts':
+        if (team.timeoutsUsed === 0)
+          return { part, value: '0 used', ok: false, note: 'No timeouts read. If the team took any, the marks were probably missed: counting marks isn\u2019t reliable yet.' };
         return team.timeoutsUsed !== null
           ? { part, value: `${team.timeoutsUsed} used`, ok: true }
           : { part, value: 'Not read', ok: false, note: 'Box the whole timeouts area.' };
@@ -92,8 +117,11 @@ export function templateChecks(t: ScorebookTemplate, page: PageReading): PartChe
         const tf = team.teamFouls ?? [];
         return tf.length && tf.every((n) => n !== null)
           ? { part, value: tf.join(' · '), ok: true }
-          : { part, value: 'Not read', ok: false, note: 'Box all rows of team foul boxes.' };
+          : { part, value: 'Not read', ok: false, note: 'Counting crossed-off boxes isn\u2019t reliable yet. Enter team fouls on the box score.' };
       }
+      default:
+        // Planned region types are kept with the template but not read yet.
+        return { part, value: 'Not read yet', ok: true };
     }
   });
 }

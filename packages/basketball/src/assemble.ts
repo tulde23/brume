@@ -107,9 +107,18 @@ export function isPlayerName(name: string | null): boolean {
   return n.length > 0 && !/^[\d\s.,-]+$/.test(n) && !FORM_LABEL.test(n);
 }
 
-export function mergePlayers(rows: PlayerLine[]): PlayerLine[] {
+/** A name cut short by the model ("D...", "Drex…"): the row was probably cut by a strip edge. */
+const truncated = (p: PlayerLine) => /(\.\.\.|…)\s*$/.test(p.name ?? '');
+
+/**
+ * Rows seen in two overlapping strips are the same player. Which copy to keep:
+ * a row cut off at the bottom edge of a strip (`edge`) or with a truncated name
+ * loses to a whole one; otherwise the copy with more cells read.
+ */
+export function mergePlayers(rows: PlayerLine[], edge: ReadonlySet<PlayerLine> = new Set()): PlayerLine[] {
   const out: PlayerLine[] = [];
   const index = new Map<string, number>();
+  const worse = (p: PlayerLine) => (edge.has(p) ? 1 : 0) + (truncated(p) ? 1 : 0);
   for (const row of rows) {
     if (filled(row) === 0) continue;
     const key = playerKey(row);
@@ -117,9 +126,11 @@ export function mergePlayers(rows: PlayerLine[]): PlayerLine[] {
     if (at === undefined) {
       if (key) index.set(key, out.length);
       out.push(row);
-    } else if (filled(row) > filled(out[at])) {
-      out[at] = { ...row, readNotes: [...out[at].readNotes, ...row.readNotes] };
+      continue;
     }
+    const kept = out[at];
+    const better = worse(row) !== worse(kept) ? worse(row) < worse(kept) : filled(row) > filled(kept);
+    if (better) out[at] = { ...row, readNotes: [...kept.readNotes, ...row.readNotes] };
   }
   return out;
 }
@@ -144,10 +155,11 @@ export function readPage(run: ExtractionRun): PageReading {
     if (!r.data) failures.push(regionId.replace('_', ' '));
     return (r.data as T | null) ?? null;
   };
-  type Details = { team_name?: string | null; coach?: string | null; location?: string | null; date?: string | null };
+  type Details = { team_name?: string | null; opponent?: string | null; coach?: string | null; location?: string | null; date?: string | null };
   const details: Details = {
     ...(boxed<Details>(REGION.details) ?? {}),
     ...(boxed<Details>(detailRegion('teamName')) ?? {}),
+    ...(boxed<Details>(detailRegion('opponent')) ?? {}),
     ...(boxed<Details>(detailRegion('coach')) ?? {}),
     ...(boxed<Details>(detailRegion('location')) ?? {}),
     ...(boxed<Details>(detailRegion('date')) ?? {}),
@@ -171,10 +183,15 @@ export function readPage(run: ExtractionRun): PageReading {
     team.periodScores = [...periods, ...Array(Math.max(0, 4 - periods.length)).fill(null)];
     team.totalPoints = scoreSource.final_score;
   }
+  const finalBox = boxed<{ final_score: number | null }>(REGION.finalScore);
+  if (finalBox?.final_score != null) team.totalPoints = finalBox.final_score;
+  const halfBox = boxed<{ half_score: number | null }>(REGION.halfScore);
+  team.halfScore = halfBox?.half_score ?? null;
   team.timeoutsUsed = timeouts ? timeouts.timeouts_used : (s?.timeouts_used ?? null);
   team.teamFouls = teamFouls?.team_fouls ?? [];
 
   const rows: PlayerLine[] = [];
+  const edgeRows = new Set<PlayerLine>();
   for (const tile of resultsFor(run, 'players')) {
     tile.imageUris.forEach((uri, k) =>
       team.crops.push({
@@ -187,8 +204,8 @@ export function readPage(run: ExtractionRun): PageReading {
       failures.push(`players strip ${tile.tileIndex + 1}`);
       continue;
     }
-    players.forEach((p, i) =>
-      rows.push({
+    players.forEach((p, i) => {
+      const row: PlayerLine = {
         number: p.no,
         name: p.name,
         fouls: p.f,
@@ -200,10 +217,13 @@ export function readPage(run: ExtractionRun): PageReading {
         readNotes: tile.warnings
           .filter((w) => w.startsWith(`$.players[${i}]`))
           .map((w) => w.replace(/^\$\.players\[\d+\]\./, '')),
-      }),
-    );
+      };
+      rows.push(row);
+      // The last row of a strip that isn't the last strip sits on the cut edge.
+      if (i === players.length - 1 && tile.tileIndex < tile.tileCount - 1) edgeRows.add(row);
+    });
   }
-  team.players = mergePlayers(rows);
+  team.players = mergePlayers(rows, edgeRows);
 
   // Fouls come from their own read of names | fouls; match rows by jersey number.
   const foulRows = resultsFor(run, REGION.fouls).flatMap((tile) => {
@@ -244,7 +264,8 @@ export function readPage(run: ExtractionRun): PageReading {
   const location = text(details?.location) ?? s?.location ?? null;
   const sameText = (a: string | null, b: string | null) =>
     !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
-  const opponent = sameText(s?.opponent ?? null, location) ? null : (s?.opponent ?? null);
+  const rawOpponent = text(details.opponent) ?? s?.opponent ?? null;
+  const opponent = sameText(rawOpponent, location) ? null : rawOpponent;
 
   return { team, opponent, date: text(details?.date) ?? s?.date ?? null, location, failures, notes };
 }

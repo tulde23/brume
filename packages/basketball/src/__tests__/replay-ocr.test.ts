@@ -1,6 +1,6 @@
 import type { NormRect } from '@brume/ocr-engine';
 
-import { placeParts } from '../autoPlace';
+import { placeParts, suggestParts } from '../autoPlace';
 // What ML Kit text recognition returned for the Stars training sheet on a Pixel 10 Pro
 // (2026-11-20): real OCR, including its misreads ("TE" for TP, "Timeouts,").
 import lines from './fixtures/stars-ocr.json';
@@ -48,5 +48,18 @@ describe('placeParts on real OCR of the Stars sheet', () => {
   it('guesses team fouls between timeouts and the score boxes without claiming it found them', () => {
     expect(parts.teamFouls).toBeDefined();
     expect(found).not.toContain('teamFouls');
+  });
+});
+
+describe('suggestParts on real OCR of the Stars sheet', () => {
+  const tall = (x: number, w: number) => ({ x, y: 0.406, w, h: 0.5 });
+  it('suggests the column under a printed heading', () => {
+    expect(suggestParts(tall(0.812, 0.025), lines)[0]).toBe('points'); // under "TE" (TP)
+    expect(suggestParts(tall(0.445, 0.074), lines)[0]).toBe('fouls'); // under FOULS
+    expect(suggestParts(tall(0.114, 0.16), lines)[0]).toBe('names'); // under Player / No.
+  });
+  it('suggests a header field from the label to its left', () => {
+    expect(suggestParts({ x: 0.154, y: 0.135, w: 0.19, h: 0.035 }, lines)[0]).toBe('teamName');
+    expect(suggestParts({ x: 0.81, y: 0.135, w: 0.17, h: 0.035 }, lines)[0]).toBe('date');
   });
 });
