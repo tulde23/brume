@@ -110,13 +110,19 @@ export default function Scan() {
           signal,
           onModelLoad: (f) =>
             setStatus({ text: 'Loading the reading model…', detail: '', fraction: f, startedAt }),
-          onProgress: (p) =>
+          onProgress: (p) => {
+            // One device-log line per crop: the only way to time a run on a phone.
+            if (p.phase !== 'writing') {
+              console.log(`[scan] ${side} ${p.phase} ${p.done + 1}/${p.total} ${p.regionId} +${Date.now() - startedAt}ms`);
+            }
             setStatus({
               ...describeProgress(side, p),
               fraction: (i + (p.done + cropFraction(p)) / Math.max(1, p.total)) / sides.length,
               startedAt,
-            }),
+            });
+          },
         });
+        console.log(`[scan] ${side} read in ${run.finishedAt - run.startedAt}ms with ${run.modelId}`);
         const reading = readPage(run);
         reading.team.crops = reading.team.crops.map((cr, k) => ({
           ...cr,

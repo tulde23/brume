@@ -107,6 +107,37 @@ class GeminiNanoModule : Module() {
       failure?.let { throw wrap(it) }
     }
 
+    /**
+     * Place images side by side (left to right) on white, with a dark bar between
+     * them, and save as PNG. Used to cut the middle out of wide table rows so the
+     * kept columns stay row-aligned in one image.
+     */
+    AsyncFunction("joinImages") { uris: List<String>, outPath: String ->
+      require(uris.isNotEmpty()) { "joinImages needs at least one image" }
+      val bitmaps = uris.map { loadBitmap(it) }
+      val bar = 6
+      val height = bitmaps.maxOf { it.height }
+      val width = bitmaps.sumOf { it.width } + bar * (bitmaps.size - 1)
+      val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+      val canvas = android.graphics.Canvas(out)
+      canvas.drawColor(android.graphics.Color.WHITE)
+      val barPaint = android.graphics.Paint().apply { color = android.graphics.Color.rgb(40, 40, 40) }
+      var x = 0f
+      bitmaps.forEachIndexed { i, b ->
+        canvas.drawBitmap(b, x, 0f, null)
+        x += b.width
+        if (i < bitmaps.lastIndex) {
+          canvas.drawRect(x, 0f, x + bar, height.toFloat(), barPaint)
+          x += bar
+        }
+      }
+      val path = Uri.parse(outPath).path ?: outPath
+      java.io.File(path).outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+      bitmaps.forEach { it.recycle() }
+      out.recycle()
+      "file://$path"
+    }
+
     AsyncFunction("warmup") Coroutine { ->
       try { client().warmup() } catch (e: Throwable) { throw wrap(e) }
     }

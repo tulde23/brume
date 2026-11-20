@@ -74,6 +74,12 @@ export interface RegionSpec {
   tiles?: TileSpec;
   /** Send only these column slices of each strip, as one image per slice, instead of the full width. */
   columns?: ColumnSpec[];
+  /**
+   * Join the column slices side by side into ONE image (cutting out the middle).
+   * Rows stay aligned, unlike separate images, and narrow-input models see the kept
+   * columns larger. If the device cannot join images, the full-width strip is sent.
+   */
+  joinColumns?: boolean;
   /** Longest side, in pixels, of each crop sent to the model. */
   maxImageSide?: number;
   maxTokens?: number;
@@ -168,4 +174,6 @@ export interface GenerateResult {
 export interface ImageOps {
   size(uri: string): Promise<{ width: number; height: number }>;
   crop(uri: string, rect: PixelRect, maxSide: number): Promise<string>;
+  /** Optional: place images side by side (left to right) into one. Needed for `joinColumns`. */
+  join?(uris: string[]): Promise<string>;
 }

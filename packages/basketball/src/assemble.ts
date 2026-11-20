@@ -8,10 +8,11 @@ interface RawPlayer {
   name: string | null;
   tp: number | null;
   f: number | null;
-  p2: number | null;
-  p3: number | null;
-  ftm: number | null;
-  fta: number | null;
+  // Not asked for since template v5, but kept so older/other templates still map.
+  p2?: number | null;
+  p3?: number | null;
+  ftm?: number | null;
+  fta?: number | null;
 }
 
 /**
@@ -129,10 +130,10 @@ export function readPage(run: ExtractionRun): PageReading {
         number: p.no,
         name: p.name,
         fouls: p.f,
-        fg2: p.p2,
-        fg3: p.p3,
-        ftMade: p.ftm,
-        ftAttempted: p.fta,
+        fg2: p.p2 ?? null,
+        fg3: p.p3 ?? null,
+        ftMade: p.ftm ?? null,
+        ftAttempted: p.fta ?? null,
         points: p.tp,
         readNotes: tile.warnings
           .filter((w) => w.startsWith(`$.players[${i}]`))

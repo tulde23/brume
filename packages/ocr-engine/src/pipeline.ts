@@ -25,17 +25,38 @@ const DEFAULT_MAX_TOKENS = 1024;
 /** Hard ceiling when a cut-off answer earns a bigger budget on retry. */
 const MAX_TOKEN_CEILING = 2048;
 
-export function buildPrompt(template: DocumentTemplate, region: RegionSpec, tile: number, tiles: number) {
+/** How a region's columns are sent: full width, as separate images, or joined into one image. */
+export type ColumnLayout = 'full' | 'separate' | 'joined';
+
+export function columnLayout(region: RegionSpec, images: Pick<ImageOps, 'join'>): ColumnLayout {
+  if (!region.columns?.length) return 'full';
+  if (!region.joinColumns) return 'separate';
+  // Joining needs native image compositing; without it, fall back to the whole strip.
+  return images.join ? 'joined' : 'full';
+}
+
+export function buildPrompt(
+  template: DocumentTemplate,
+  region: RegionSpec,
+  tile: number,
+  tiles: number,
+  layout: ColumnLayout = region.columns?.length && !region.joinColumns ? 'separate' : 'full',
+) {
   const cols = region.columns ?? [];
   const images =
-    cols.length > 1
+    layout === 'separate' && cols.length > 1
       ? `\nYou are given ${cols.length} images of the SAME rows, side by side on the page: ` +
         cols.map((c, i) => `image ${i + 1} is the ${c.label}`).join('; ') +
         '. Row k in one image is row k in the others; match them top to bottom.'
-      : '';
+      : layout === 'joined' && cols.length > 1
+        ? '\nThe middle of each row has been cut out to make the important columns larger. ' +
+          'From left to right, separated by dark vertical bars: ' +
+          cols.map((c) => c.label).join(' | ') +
+          '. Each row still runs straight across the image.'
+        : '';
   const part =
     tiles > 1
-      ? `\n${cols.length > 1 ? 'These images are' : 'This image is'} strip ${tile + 1} of ${tiles} cut from the same area, top to bottom. ` +
+      ? `\n${layout === 'separate' ? 'These images are' : 'This image is'} strip ${tile + 1} of ${tiles} cut from the same area, top to bottom. ` +
         'Rows cut off at the top or bottom edge may be partial; include them only if you can read them.'
       : '';
   return (
@@ -104,15 +125,18 @@ export async function runTemplate(
 
     const t0 = Date.now();
     const maxSide = job.region.maxImageSide ?? DEFAULT_MAX_SIDE;
-    const slices = job.region.columns?.length
-      ? job.region.columns.map((c) => ({ x: c.x, y: job.rect.y, w: c.w, h: job.rect.h }))
-      : [job.rect];
-    const imageUris: string[] = [];
+    const layout = columnLayout(job.region, images);
+    const slices =
+      layout === 'full'
+        ? [job.rect]
+        : job.region.columns!.map((c) => ({ x: c.x, y: job.rect.y, w: c.w, h: job.rect.h }));
+    let imageUris: string[] = [];
     for (const slice of slices) {
       imageUris.push(await images.crop(sourceUri, toPixels(slice, width, height), maxSide));
     }
+    if (layout === 'joined') imageUris = [await images.join!(imageUris)];
     const imageUri = imageUris[0];
-    const prompt = buildPrompt(template, job.region, job.tileIndex, job.tileCount);
+    const prompt = buildPrompt(template, job.region, job.tileIndex, job.tileCount, layout);
     const jsonSchema = toJsonSchema(job.region.schema);
     const maxAttempts = 1 + (options.retries ?? 1);
 

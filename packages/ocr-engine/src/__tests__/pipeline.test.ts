@@ -128,6 +128,48 @@ describe('runTemplate', () => {
     expect(crops).toHaveLength(4);
   });
 
+  describe('joined columns', () => {
+    const joined: DocumentTemplate = {
+      ...template,
+      regions: [
+        {
+          ...template.regions[0],
+          columns: [
+            { x: 0, w: 0.3, label: 'names' },
+            { x: 0.7, w: 0.3, label: 'totals' },
+          ],
+          joinColumns: true,
+        },
+      ],
+    };
+    const cropOps = (log: string[]): ImageOps => ({
+      size: async () => ({ width: 1000, height: 1000 }),
+      crop: async (_u, r) => {
+        const id = `${r.originX},${r.originY},${r.width}x${r.height}`;
+        log.push(id);
+        return id;
+      },
+    });
+
+    it('crops each slice and sends one joined image per strip', async () => {
+      const crops: string[] = [];
+      const ops = { ...cropOps(crops), join: async (uris: string[]) => `join(${uris.join('+')})` };
+      const backend = fakeBackend(['{"n": 1}', '{"n": 2}']);
+      await runTemplate(backend, ops, 'page.jpg', joined);
+      expect(backend.calls[0].imageUris).toEqual(['join(0,0,300x500+700,0,300x500)']);
+      expect(backend.calls[0].prompt).toContain('names | totals');
+      expect(backend.calls[0].prompt).not.toContain('You are given');
+    });
+
+    it('falls back to the full-width strip when images cannot be joined', async () => {
+      const crops: string[] = [];
+      const backend = fakeBackend(['{"n": 1}', '{"n": 2}']);
+      await runTemplate(backend, cropOps(crops), 'page.jpg', joined);
+      expect(backend.calls[0].imageUris).toEqual(['0,0,1000x500']);
+      expect(backend.calls[0].prompt).not.toContain('cut out');
+    });
+  });
+
   it('gives a cut-off answer a bigger budget instead of a warmer retry', async () => {
     const backend = fakeBackend([{ text: '{"n": 1', cut: true }, '{"n": 1}', '{"n": 2}']);
     const run = await runTemplate(backend, fakeImages, 'page.jpg', template);

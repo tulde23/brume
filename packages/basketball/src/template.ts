@@ -24,7 +24,11 @@ const nullableInt = (description: string, maximum = 200): FieldSchema => ({
 const summarySchema: FieldSchema = {
   type: 'object',
   properties: {
-    team_name: { type: 'string', nullable: true, description: "this page's team (TEAM / Home / Visitor)" },
+    team_name: {
+      type: 'string',
+      nullable: true,
+      description: 'the handwritten name after "TEAM:" (not the printed word TEAM)',
+    },
     opponent: { type: 'string', nullable: true, description: 'the OTHER team, only if written (vs. / Opponent)' },
     date: { type: 'string', nullable: true, description: 'as written' },
     location: { type: 'string', nullable: true, description: 'Played at / Site / Gym' },
@@ -39,7 +43,12 @@ const summarySchema: FieldSchema = {
   },
 };
 
-/** Short keys; assemble.ts maps them back to PlayerLine. */
+/**
+ * Short keys, and only what a box score needs most. Output tokens are ~75% of
+ * reading time, so each extra field per row is expensive. (v4 also asked for
+ * 2PT/3PT/FT totals; scorebooks rarely fill those in, so they were mostly null.)
+ * assemble.ts maps these back to PlayerLine.
+ */
 const playersSchema: FieldSchema = {
   type: 'object',
   properties: {
@@ -54,11 +63,7 @@ const playersSchema: FieldSchema = {
           no: { type: 'string', nullable: true, description: 'jersey number' },
           name: { type: 'string', nullable: true },
           tp: nullableInt('TOTAL POINTS column (TP / PTS)', 100),
-          f: nullableInt('personal fouls marked', 6),
-          p2: nullableInt('2-pt baskets total, only if a 2PT/FG total column is filled in', 40),
-          p3: nullableInt('3-pt baskets total, only if a 3PT total column is filled in', 20),
-          ftm: nullableInt('free throws made, from the FT column if filled in', 40),
-          fta: nullableInt('free throws attempted, from the FT column if filled in', 40),
+          f: nullableInt('fouls: the F total, or crossed-out P1, P2... boxes', 6),
         },
       },
     },
@@ -68,7 +73,7 @@ const playersSchema: FieldSchema = {
 export const SCOREBOOK_PAGE_TEMPLATE: DocumentTemplate = {
   id: 'basketball.scorebook-page',
   name: 'Basketball scorebook (one team page)',
-  version: 4,
+  version: 5,
   systemPrompt:
     'You transcribe handwritten basketball scorebook pages exactly as written. ' +
     'You never invent players or numbers. If a value is blank or you cannot read it, use null.',
@@ -92,19 +97,23 @@ export const SCOREBOOK_PAGE_TEMPLATE: DocumentTemplate = {
       label: 'Player rows',
       // Header and period-score boxes usually sit near the top; most of a page is the player table.
       rect: { x: 0, y: 0.1, w: 1, h: 0.82 },
-      // Five full-width strips at up to 2048px keep each row tall enough to read.
-      // (Tried in v3: sending only the name and totals columns as separate images. A 2B model
-      // could not keep rows aligned across images, so TP accuracy fell from 6/11 to 1/11 on the
-      // Stars sheet. The engine still supports `columns` for larger models.)
       tiles: { rows: 5, overlap: 0.15 },
+      // Cut out the quarter-by-quarter marks and join names | totals into one image, so the
+      // TP column is not squeezed away when a model (Gemini Nano) resizes to a square.
+      // History on the Stars sheet: v3 sent these as SEPARATE images and a 2B model lost row
+      // alignment (TP 1/11); joining keeps every row on one line. Where images cannot be
+      // joined (no native module), the engine falls back to full-width strips.
+      columns: [
+        { x: 0, w: 0.34, label: 'jersey number and player name' },
+        { x: 0.68, w: 0.32, label: 'totals columns (FG, FT, F, TP or PTS)' },
+      ],
+      joinColumns: true,
       maxImageSide: 2048,
-      maxTokens: 600,
+      maxTokens: 300,
       prompt:
-        'This is part of the player table on a basketball scorebook page. Each row is one player: ' +
-        'jersey number, name, foul boxes, scoring marks by quarter, then totals columns at the right. ' +
-        'For each row with a player written in, give the number, the name, the TOTAL POINTS column ' +
-        '(TP or PTS), and the number of fouls marked (crossed-out P1, P2... boxes, ticks, or numbers). ' +
-        'Fill p2, p3, ftm and fta only from totals columns that are actually filled in; otherwise null. ' +
+        'This is part of the player table on a basketball scorebook page. Each row is one player. ' +
+        'For each row with a player written in, give the jersey number, the name, the TOTAL POINTS ' +
+        'column (TP or PTS), and the fouls (the F total, or crossed-out P1, P2... boxes). ' +
         'Use null for any blank cell; do not write 0 unless a 0 is written. ' +
         'Skip rows with no player, and anything that is not the player table (like a running-score grid).',
       schema: playersSchema,

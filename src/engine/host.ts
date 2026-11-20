@@ -5,6 +5,7 @@ import {
   runTemplate,
   type DocumentTemplate,
   type ExtractionRun,
+  type ImageOps,
   type RunOptions,
   type VisionBackend,
 } from '@brume/ocr-engine';
@@ -14,6 +15,7 @@ import {
   modelPaths,
   modelStatus,
 } from '@brume/ocr-engine/native';
+import { File, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { Platform } from 'react-native';
 
@@ -125,8 +127,22 @@ export async function extract(
   options: RunOptions & { onModelLoad?: (fraction: number) => void } = {},
 ): Promise<ExtractionRun> {
   const backend = await backendFor(modelId, options.onModelLoad);
-  return runTemplate(backend, expoImageOps, imageUri, template, options);
+  return runTemplate(backend, imageOps, imageUri, template, options);
 }
+
+let joinCount = 0;
+
+/**
+ * expo-image-manipulator can crop and resize but not composite, so joining
+ * column slices uses the native module where it exists (Android). Elsewhere
+ * `join` is absent and templates fall back to full-width strips.
+ */
+const imageOps: ImageOps = GeminiNano
+  ? {
+      ...expoImageOps,
+      join: (uris) => GeminiNano!.joinImages(uris, new File(Paths.cache, `join-${Date.now()}-${joinCount++}.png`).uri),
+    }
+  : expoImageOps;
 
 export async function unloadModel(): Promise<void> {
   const b = loaded;
