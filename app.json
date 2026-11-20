@@ -14,7 +14,7 @@
     "android": {
       "package": "com.inkstat.app",
       "adaptiveIcon": {
-        "backgroundColor": "#0F6E75",
+        "backgroundColor": "#F7F3EA",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
