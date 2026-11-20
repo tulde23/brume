@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { listGames, listSeasons } from '@/db';
-import { pct, perGame, seasonToCsv, seasonTotals, teamNames, type Game } from '@/domains/basketball';
+import { pct, perGame, seasonToCsv, seasonTotals, teamNames, type Game } from '@brume/basketball';
 import { shareText } from '@/lib/files';
 import { Button, T } from '@/ui/components';
 import { base, space, useColors } from '@/ui/theme';

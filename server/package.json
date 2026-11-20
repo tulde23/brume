@@ -1,0 +1,30 @@
+{
+  "name": "@brume/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Brume sync API: stores scorebook games per team space in SQLite.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "node build.mjs",
+    "start": "node dist/index.mjs",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.2.0"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.1.11",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
+    "hono": "^4.13.19",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "zod": "^4.6.7"
+  }
+}

@@ -43,7 +43,8 @@
     "ios": "expo run:ios",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "test:server": "npm --prefix server test"
   },
   "private": true,
   "workspaces": [
@@ -54,7 +55,8 @@
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/android/",
-      "/ios/"
+      "/ios/",
+      "/server/"
     ]
   }
 }

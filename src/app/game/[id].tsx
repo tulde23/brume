@@ -25,7 +25,7 @@ import {
   type PlayerLine,
   type Side,
   type TeamSheet,
-} from '@/domains/basketball';
+} from '@brume/basketball';
 import { deleteGameImages, shareText } from '@/lib/files';
 import { Button, Card, T } from '@/ui/components';
 import { base, fonts, radius, space, useColors, type Colors } from '@/ui/theme';
@@ -288,7 +288,7 @@ function TeamEditor({
               <View style={styles.tableRow}>
                 <Input value={p.number ?? ''} width={44} c={c} issue={flag(`players.${i}.number`)}
                   keyboardType="number-pad" onChange={(v) => setPlayer(i, { number: v || null })} />
-                <Input value={p.name ?? ''} width={130} c={c}
+                <Input value={p.name ?? ''} width={130} c={c} text
                   onChange={(v) => setPlayer(i, { name: v || null })} />
                 {STAT_COLUMNS.map((col) => (
                   <Input key={col.key} value={p[col.key] === null ? '' : String(p[col.key])} width={col.width} c={c}
@@ -356,8 +356,10 @@ function Cell({ label, value, onChange, width, issue, c }: {
 }
 
 /** Commits on blur so typing "12" does not save "1" then re-validate mid-keystroke. */
-function Input({ value, onChange, width, issue, keyboardType, c }: {
-  value: string; onChange: (v: string) => void; width: number; issue?: Issue; keyboardType?: KeyboardTypeOptions; c: Colors;
+function Input({ value, onChange, width, issue, keyboardType, text: isText, c }: {
+  value: string; onChange: (v: string) => void; width: number; issue?: Issue; keyboardType?: KeyboardTypeOptions;
+  /** Free text (names): body font, left-aligned. Default is a centered numeric cell. */
+  text?: boolean; c: Colors;
 }) {
   const [text, setText] = useState(value);
   const [prev, setPrev] = useState(value);
@@ -375,7 +377,12 @@ function Input({ value, onChange, width, issue, keyboardType, c }: {
       keyboardType={keyboardType}
       selectTextOnFocus
       accessibilityHint={issue?.message}
-      style={[styles.input, styles.cell, { width, color: c.text, backgroundColor: bg, borderColor: border }]}
+      style={[
+        styles.input,
+        styles.cell,
+        isText && { textAlign: 'left', fontFamily: fonts.body },
+        { width, color: c.text, backgroundColor: bg, borderColor: border },
+      ]}
     />
   );
 }

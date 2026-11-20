@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { listGames } from '@/db';
-import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@/domains/basketball';
+import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@brume/basketball';
 import { getActiveModelId } from '@/engine/host';
 import { Badge, Button, Card, StatusDot, T } from '@/ui/components';
 import { Logo } from '@/ui/Logo';
@@ -49,6 +49,17 @@ export default function Home() {
           <View style={{ gap: space.lg }}>
             <View style={styles.between}>
               <Logo size={28} />
+              <View style={base.row}>
+              <Pressable
+                onPress={() => router.push('/sync')}
+                accessibilityRole="button"
+                accessibilityLabel="Sync with server"
+                style={styles.iconButton}>
+                <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={c.text} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <Path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4 4 0 0 1-1 8.5" />
+                  <Path d="M12 12v8M9 15l3-3 3 3" />
+                </Svg>
+              </Pressable>
               <Pressable
                 onPress={() => router.push('/models')}
                 accessibilityRole="button"
@@ -59,6 +70,7 @@ export default function Home() {
                   <Path d="M16 5v4M10 15v4" />
                 </Svg>
               </Pressable>
+              </View>
             </View>
 
             {model && !model.ready ? (

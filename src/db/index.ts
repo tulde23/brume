@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import type { Game } from '@/domains/basketball';
+import type { Game } from '@brume/basketball';
 
 export const DB_NAME = 'brume.db';
 
@@ -20,7 +20,34 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
       key TEXT PRIMARY KEY NOT NULL,
       value TEXT NOT NULL
     );
+    -- Deletes waiting to be sent to the sync server.
+    CREATE TABLE IF NOT EXISTS tombstones (
+      id TEXT PRIMARY KEY NOT NULL,
+      deleted_at INTEGER NOT NULL
+    );
   `);
+}
+
+export async function gamesUpdatedSince(db: SQLiteDatabase, since: number): Promise<Game[]> {
+  const rows = await db.getAllAsync<{ data: string }>(
+    'SELECT data FROM games WHERE updated_at > ? ORDER BY updated_at',
+    since,
+  );
+  return rows.map((r) => JSON.parse(r.data) as Game);
+}
+
+export async function listTombstones(db: SQLiteDatabase): Promise<{ id: string; deletedAt: number }[]> {
+  const rows = await db.getAllAsync<{ id: string; deleted_at: number }>('SELECT id, deleted_at FROM tombstones');
+  return rows.map((r) => ({ id: r.id, deletedAt: r.deleted_at }));
+}
+
+export async function clearTombstone(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync('DELETE FROM tombstones WHERE id = ?', id);
+}
+
+/** Apply a delete that came from the server, without queueing it to be sent back. */
+export async function deleteGameFromSync(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync('DELETE FROM games WHERE id = ?', id);
 }
 
 export async function saveGame(db: SQLiteDatabase, game: Game): Promise<void> {
@@ -60,7 +87,14 @@ export async function listSeasons(db: SQLiteDatabase): Promise<string[]> {
 }
 
 export async function deleteGame(db: SQLiteDatabase, id: string): Promise<void> {
-  await db.runAsync('DELETE FROM games WHERE id = ?', id);
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM games WHERE id = ?', id);
+    await db.runAsync(
+      'INSERT INTO tombstones (id, deleted_at) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at',
+      id,
+      Date.now(),
+    );
+  });
 }
 
 export async function getSetting(db: SQLiteDatabase, key: string): Promise<string | null> {

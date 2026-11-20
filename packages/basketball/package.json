@@ -1,0 +1,12 @@
+{
+  "name": "@brume/basketball",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Basketball scorebook domain: page template, assembly, cross-checks, season stats, export. Shared by the app and the sync API.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@brume/ocr-engine": "*"
+  }
+}

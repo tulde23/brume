@@ -1,0 +1,12 @@
+# The only Docker image in this repo is the API (server/Dockerfile).
+# Send just what it needs as build context.
+*
+!server
+!packages/ocr-engine/package.json
+!packages/ocr-engine/src
+!packages/basketball/package.json
+!packages/basketball/src
+server/node_modules
+server/dist
+server/data
+**/__tests__

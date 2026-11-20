@@ -14,7 +14,7 @@ import {
   type Game,
   type PageReading,
   type Side,
-} from '@/domains/basketball';
+} from '@brume/basketball';
 import { extract, getActiveModelId } from '@/engine/host';
 import { keepImage, newId } from '@/lib/files';
 import { Button, Card, ProgressBar, T } from '@/ui/components';
