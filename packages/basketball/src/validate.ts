@@ -72,6 +72,21 @@ export function validateTeam(team: TeamSheet, side: Side, rules = DEFAULT_RULES)
       message: `Player points add up to ${playerTotal}, but the final score says ${team.totalPoints}`,
     });
   }
+  // Some points unread: the known ones can't be checked exactly, but falling short of
+  // the final is still worth saying; it usually means rows were missed or left blank.
+  if (team.totalPoints !== null && playerTotal === null && team.players.length) {
+    const known = team.players.reduce((n, p) => n + (p.points ?? 0), 0);
+    const blank = team.players.filter((p) => p.points === null).length;
+    if (known < team.totalPoints) {
+      issues.push({
+        severity: 'warning',
+        path: at('totalPoints'),
+        message:
+          `Player points found so far add up to ${known} of ${team.totalPoints}` +
+          ` (${blank} player${blank === 1 ? ' has' : 's have'} no points read). Some rows may be missing.`,
+      });
+    }
+  }
   if (team.totalPoints !== null && periodTotal !== null && periodTotal !== team.totalPoints) {
     issues.push({
       severity: 'warning',

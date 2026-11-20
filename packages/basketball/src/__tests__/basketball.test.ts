@@ -204,6 +204,27 @@ describe('validateTeam', () => {
     );
   });
 
+  it('says when known points fall short of the final (the Pixel run on the Stars sheet)', () => {
+    const team = {
+      ...emptyTeam(),
+      periodScores: [15, 11, 13, 11],
+      totalPoints: 50,
+      players: [
+        player({ number: '9', name: 'Jordan' }),
+        player({ number: '10', name: 'Drexler' }),
+        player({ number: '11', points: 4 }),
+        player({ number: '12', points: 3 }),
+        player({ number: '13', points: 6 }),
+        player({ number: '14', points: 8 }),
+        player({ number: '15', points: 2 }),
+      ],
+    };
+    const issue = validateTeam(team, 'home').find((i) => i.path === 'home.totalPoints');
+    expect(issue?.message).toBe(
+      'Player points found so far add up to 23 of 50 (2 players have no points read). Some rows may be missing.',
+    );
+  });
+
   it('passes a clean sheet', () => {
     const team = {
       ...emptyTeam(),
