@@ -1,4 +1,4 @@
-import type { PageReading } from './assemble';
+import { normalizeDate, type PageReading } from './assemble';
 
 /**
  * Known answers for one sample page, written by a person reading the sheet.
@@ -16,7 +16,48 @@ export interface BenchTruth {
   /** Points per period (not running totals). */
   periods?: number[];
   final?: number;
-  players?: { no: string; name?: string; points?: number; fouls?: number }[];
+  players?: {
+    no: string;
+    name?: string;
+    points?: number;
+    fouls?: number;
+    fg2?: number;
+    fg3?: number;
+    ftm?: number;
+    fta?: number;
+  }[];
+  /** Pages that belong to one game share this id; `side` says which team's page it is. */
+  game?: string;
+  side?: 'home' | 'away';
+  opponent?: string;
+  timeouts?: number;
+  /** Team fouls per half. */
+  teamFouls?: number[];
+}
+
+/** The answer key as a team sheet: what a perfect read of this page would save. */
+export function truthTeam(t: BenchTruth): import('./types').TeamSheet {
+  return {
+    name: t.teamName ?? null,
+    coach: t.coach ?? null,
+    periodScores: t.periods ? [...t.periods] : [null, null, null, null],
+    totalPoints: t.final ?? null,
+    timeoutsUsed: t.timeouts ?? null,
+    teamFouls: t.teamFouls ? [...t.teamFouls] : undefined,
+    players: (t.players ?? []).map((p) => ({
+      number: p.no,
+      name: p.name ?? null,
+      points: p.points ?? null,
+      fouls: p.fouls ?? null,
+      fg2: p.fg2 ?? null,
+      fg3: p.fg3 ?? null,
+      ftMade: p.ftm ?? null,
+      ftAttempted: p.fta ?? null,
+      readNotes: [],
+    })),
+    pageUri: null,
+    crops: [],
+  };
 }
 
 export interface BenchScore {
@@ -44,7 +85,12 @@ export function scoreReading(truth: BenchTruth, page: PageReading): BenchScore {
   if (truth.teamName !== undefined) check('team', page.team.name, truth.teamName, same(page.team.name, truth.teamName));
   if (truth.coach !== undefined) check('coach', page.team.coach, truth.coach, same(page.team.coach, truth.coach));
   if (truth.location !== undefined) check('location', page.location, truth.location, same(page.location, truth.location));
-  if (truth.date !== undefined) check('date', page.date, truth.date, same(page.date, truth.date));
+  if (truth.date !== undefined) {
+    // "12/1/26" on the sheet and "2026-12-01" read are the same date.
+    const asDate = (s: string | null | undefined) => (s ? normalizeDate(s) : null);
+    const ok = same(page.date, truth.date) || (!!asDate(page.date) && asDate(page.date) === asDate(truth.date));
+    check('date', page.date, truth.date, ok);
+  }
   if (truth.final !== undefined) check('final', page.team.totalPoints, truth.final, page.team.totalPoints === truth.final);
   if (truth.periods) {
     const got = page.team.periodScores.slice(0, truth.periods.length);

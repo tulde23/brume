@@ -7,7 +7,15 @@ import {
   templateForPhoto,
   readPage,
   scoreReading,
+  emptyTeam,
+  isUsable,
+  normalizeDate,
+  seasonFor,
+  truthTeam,
   type BenchScore,
+  type Game,
+  type PageReading,
+  type Side,
   type BenchTruth,
   type PartId,
 } from '@inkstat/basketball';
@@ -18,8 +26,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { getActiveTemplate, saveGame } from '@/db';
 import { extract, getActiveModelId } from '@/engine/host';
-import { readBenchMarks, type BenchMarks } from '@/lib/files';
+import { keepImage, readBenchMarks, type BenchMarks } from '@/lib/files';
 import { Button, Card, T } from '@/ui/components';
 import { base, fonts, space, useColors } from '@/ui/theme';
 import { recognizePageText } from '../../modules/page-text';
@@ -48,6 +57,23 @@ interface Result {
 }
 
 type Mode = 'template' | 'marked' | 'whole-page';
+type GameMode = 'games' | 'answers';
+
+/** Samples that belong to a game (truth.game), paired by side. */
+function gamesOf(samples: Sample[]): { game: string; home?: Sample; away?: Sample }[] {
+  const by = new Map<string, { game: string; home?: Sample; away?: Sample }>();
+  for (const s of samples) {
+    if (!s.truth.game || !s.truth.side) continue;
+    const g = by.get(s.truth.game) ?? { game: s.truth.game };
+    g[s.truth.side] = s;
+    by.set(s.truth.game, g);
+  }
+  return [...by.values()].sort((a, b) => a.game.localeCompare(b.game));
+}
+
+/** `only` takes ids, or prefixes ending in * (only=g0*,stars). */
+const matches = (only: string[] | undefined, id: string) =>
+  !only || only.some((o) => (o.endsWith('*') ? id.startsWith(o.slice(0, -1)) : id === o));
 
 function loadSamples(): Sample[] {
   const root = new Directory(Paths.document, 'bench');
@@ -79,6 +105,7 @@ export default function Bench() {
   useFocusEffect(useCallback(() => setSamples(loadSamples()), []));
   const [results, setResults] = useState<Record<string, Result>>({});
   const [running, setRunning] = useState<string | null>(null);
+  const [gamesNote, setGamesNote] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
 
@@ -138,7 +165,7 @@ export default function Bench() {
     setSamples(list);
     try {
       for (const s of list) {
-        if (only && !only.includes(s.id)) continue;
+        if (!matches(only, s.id)) continue;
         if (mode === 'marked' && !s.marked) continue;
         setRunning(s.id);
         const r = await runOne(s, mode, ctrl.signal);
@@ -153,16 +180,112 @@ export default function Bench() {
     }
   };
 
-  // Driven from a computer: inkstat://bench?run=template&only=stars,nba-nets-1984
+  /**
+   * League samples become real games, saved under a stable id (league-g01) so a second
+   * run replaces the first. 'answers' saves the answer key as it is, instantly; 'games'
+   * reads both pages through the scan pipeline with the active template, scores each
+   * page, and saves what was read. Home and away come from each page's truth.side.
+   */
+  const runGames = async (mode: GameMode, only?: string[]) => {
+    const ctrl = new AbortController();
+    abort.current = ctrl;
+    await activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => undefined);
+    const started = Date.now();
+    console.log(`[bench-start] ${mode}`);
+    const list = loadSamples();
+    setSamples(list);
+    let saved = 0;
+    try {
+      const layout = mode === 'games' ? await getActiveTemplate(db) : null;
+      if (mode === 'games' && !(layout && isUsable(layout))) {
+        throw new Error('Make a template first: reading games uses the active template.');
+      }
+      const modelId = mode === 'games' ? await getActiveModelId(db) : 'answer-key';
+      for (const g of gamesOf(list)) {
+        if (!matches(only, g.game)) continue;
+        const id = `league-${g.game}`;
+        const readings: Partial<Record<Side, PageReading>> = {};
+        for (const side of ['home', 'away'] as const) {
+          const s = g[side];
+          if (!s) continue;
+          setRunning(s.id);
+          const pageUri = keepImage(s.uri, id, side);
+          if (mode === 'answers') {
+            readings[side] = {
+              team: { ...truthTeam(s.truth), pageUri },
+              opponent: s.truth.opponent ?? null,
+              date: s.truth.date ?? null,
+              location: s.truth.location ?? null,
+              failures: [],
+              notes: [],
+            };
+            continue;
+          }
+          const t0 = Date.now();
+          const lines = await recognizePageText(pageUri);
+          const chosen = templateForPhoto(layout, lines);
+          const doc = chosen.template ? applyTemplate(SCOREBOOK_PAGE_TEMPLATE, chosen.template) : SCOREBOOK_PAGE_TEMPLATE;
+          const run = await extract(modelId, pageUri, doc, { signal: ctrl.signal });
+          const reading = readPage(run);
+          reading.team.pageUri = pageUri;
+          reading.team.crops = reading.team.crops.map((cr, k) => ({ ...cr, uri: keepImage(cr.uri, id, `${side}-crop-${k}`) }));
+          readings[side] = reading;
+          const score = scoreReading(s.truth, reading);
+          const result: Result = {
+            mode: 'template',
+            seconds: Math.round((Date.now() - t0) / 100) / 10,
+            placed: chosen.template?.enabled ?? [],
+            score,
+          };
+          console.log(`[bench-result] ${JSON.stringify({ id: s.id, source: chosen.source, ...result })}`);
+          setResults((all) => ({ ...all, [s.id]: result }));
+        }
+        const home = readings.home?.team ?? emptyTeam();
+        const away = readings.away?.team ?? emptyTeam();
+        home.name ??= readings.away?.opponent ?? g.away?.truth.teamName ?? null;
+        away.name ??= readings.home?.opponent ?? g.home?.truth.teamName ?? null;
+        const date = normalizeDate(readings.home?.date ?? readings.away?.date ?? null);
+        const now = Date.now();
+        const game: Game = {
+          id,
+          date,
+          location: readings.home?.location ?? readings.away?.location ?? null,
+          season: seasonFor(date),
+          home,
+          away,
+          modelId,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await saveGame(db, game);
+        saved++;
+        console.log(`[bench-game] ${id} ${home.name} ${home.totalPoints ?? '?'} - ${away.totalPoints ?? '?'} ${away.name}`);
+      }
+      setGamesNote(
+        `${saved} game${saved === 1 ? '' : 's'} saved (${mode === 'answers' ? 'from the answer key' : 'as read'}). They are on Home and in Season.`,
+      );
+    } catch (e) {
+      if (!ctrl.signal.aborted) setGamesNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      console.log(`[bench-done] ${mode} ${saved} games ${Math.round((Date.now() - started) / 1000)}s`);
+      setRunning(null);
+      await deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => undefined);
+    }
+  };
+
+  // Driven from a computer: inkstat://bench?run=template&only=stars,g01-*
+  // or run=answers / run=games (only=g0*) to save league games.
   // (adb shell am start -d ...); results are read from the Metro log.
   // `n` is a nonce so the same run can be requested again.
-  const { run, only, n } = useLocalSearchParams<{ run?: Mode; only?: string; n?: string }>();
+  const { run, only, n } = useLocalSearchParams<{ run?: Mode | GameMode; only?: string; n?: string }>();
   const autoRan = useRef<string | null>(null);
   useEffect(() => {
     const key = `${run}|${only}|${n}`;
     if (!run || autoRan.current === key) return;
     autoRan.current = key;
-    void runAll(run, only ? only.split(',') : undefined);
+    const ids = only ? only.split(',') : undefined;
+    // On the next tick: a run sets state, which the effect itself must not do.
+    setTimeout(() => void (run === 'games' || run === 'answers' ? runGames(run, ids) : runAll(run, ids)), 0);
     // runAll is recreated each render; the key above makes this run once per link.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run, only, n]);
@@ -192,6 +315,23 @@ export default function Bench() {
         onPress={() => runAll('marked')}
         disabled={!!running || !samples.some((s) => s.marked)}
       />
+      {gamesOf(samples).length > 0 && (
+        <Card>
+          <T style={{ fontFamily: fonts.bodyBold }}>{`League games: ${gamesOf(samples).length}`}</T>
+          <T muted style={base.small}>
+            Saves each game, home and away pages together, as a real game you can open. Running again replaces them.
+          </T>
+          <View style={base.row}>
+            <View style={{ flex: 1 }}>
+              <Button title="Import answers" kind="secondary" onPress={() => runGames('answers')} disabled={!!running} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button title="Read and save" onPress={() => runGames('games')} disabled={!!running} />
+            </View>
+          </View>
+          {gamesNote && <T style={{ fontSize: 14 }}>{gamesNote}</T>}
+        </Card>
+      )}
       {running && <Button title={`Running ${running}… Cancel`} kind="secondary" onPress={() => abort.current?.abort()} />}
       {samples.map((s) => {
         const r = results[s.id];

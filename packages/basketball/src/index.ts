@@ -33,7 +33,7 @@ export {
 } from './scorebook';
 export { templateChecks, type PartCheck } from './templateCheck';
 export { placeParts, suggestParts, type Placement } from './autoPlace';
-export { scoreReading, type BenchScore, type BenchTruth } from './bench';
+export { scoreReading, truthTeam, type BenchScore, type BenchTruth } from './bench';
 export { CATALOG, SPORT_ID } from "./scorebook";
 export { LIBRARY, alignParts, anchorsForTemplate, matchLibrary, templateForPhoto, type BuiltinLayout, type LibraryMatch, type TemplateSource } from './library';
 

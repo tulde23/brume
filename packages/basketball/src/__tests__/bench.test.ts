@@ -32,3 +32,11 @@ describe('scoreReading', () => {
     expect([s.foulsRight, s.foulsChecked]).toEqual([3, 3]);
   });
 });
+
+describe('bench dates', () => {
+  it('counts a written date and its ISO reading as the same', () => {
+    const page = { team: { name: null, coach: null, totalPoints: null, periodScores: [], players: [] }, date: '2026-12-01', location: null } as unknown as Parameters<typeof scoreReading>[1];
+    const score = scoreReading({ id: 'x', layout: 'x', date: '12/1/26' }, page);
+    expect(score.checks.find((c) => c.field === 'date')?.ok).toBe(true);
+  });
+});
