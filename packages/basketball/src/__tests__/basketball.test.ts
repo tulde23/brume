@@ -2,10 +2,19 @@ import type { ExtractionRun, RegionResult } from '@brume/ocr-engine';
 
 import {
   SCOREBOOK_PAGE_TEMPLATE,
-  applyScorebookLayout,
+  REGION,
+  REQUIRED_PARTS,
+  applyTemplate,
+  fromLegacyLayout,
+  isUsable,
+  markedParts,
+  newTemplate,
+  normalizeTemplate,
+  unmarkedParts,
+  templateChecks,
+  type ScorebookTemplate,
   emptyTeam,
   isPlayerName,
-  normalizeLayout,
   gameToCsv,
   mergePlayers,
   normalizeDate,
@@ -283,33 +292,113 @@ describe('season totals and export', () => {
   });
 });
 
-describe('scorebook layout', () => {
-  it('reads the player table from the marked box with joined name and points columns', () => {
-    const t = applyScorebookLayout(SCOREBOOK_PAGE_TEMPLATE, {
-      version: 1,
-      table: { x: 0.1, y: 0.36, w: 0.8, h: 0.4 },
-      nameColumn: { x: 0.11, w: 0.17 },
-      pointsColumn: { x: 0.83, w: 0.03 },
-    });
+describe('scorebook templates', () => {
+  const marked = (): ScorebookTemplate => ({
+    ...newTemplate('t1', 'Stars', null, 0),
+    parts: {
+      rows: { x: 0.1, y: 0.36, w: 0.8, h: 0.4 },
+      names: { x: 0.11, w: 0.17 },
+      points: { x: 0.83, w: 0.03 },
+      fouls: { x: 0.45, w: 0.08 },
+      teamName: { x: 0.06, y: 0.02, w: 0.3, h: 0.05 },
+      coach: { x: 0.4, y: 0.02, w: 0.2, h: 0.05 },
+      location: { x: 0.64, y: 0.02, w: 0.18, h: 0.05 },
+      date: { x: 0.84, y: 0.02, w: 0.14, h: 0.05 },
+      timeouts: { x: 0.03, y: 0.19, w: 0.28, h: 0.1 },
+      teamFouls: { x: 0.33, y: 0.19, w: 0.34, h: 0.1 },
+      quarters: { x: 0.69, y: 0.19, w: 0.29, h: 0.1 },
+    },
+  });
+
+  it('reads the player table from the marked columns, joined left to right', () => {
+    const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, marked());
     const players = t.regions.find((r) => r.id === 'players')!;
     expect(players.rect).toEqual({ x: 0.1, y: 0.36, w: 0.8, h: 0.4 });
     expect(players.joinColumns).toBe(true);
-    expect(players.columns?.map((c) => c.label)).toEqual(['jersey number and player name', 'total points (TP or PTS)']);
-    expect(players.tiles).toMatchObject({ targetAspect: expect.any(Number) });
-    expect(t.regions.find((r) => r.id === 'summary')).toEqual(SCOREBOOK_PAGE_TEMPLATE.regions[0]);
+    expect(players.columns?.map((c) => c.x)).toEqual([0.11, 0.45, 0.83]);
+    expect(players.columns?.[1].label).toContain('foul boxes');
+    expect(players.prompt).toContain('crossed off');
   });
 
-  it('keeps bands inside the table and the table inside the page', () => {
-    const l = normalizeLayout({
-      version: 1,
-      table: { x: 0.9, y: -0.2, w: 0.5, h: 2 },
-      nameColumn: { x: 0, w: 0.5 },
-      pointsColumn: { x: 0.99, w: 0.2 },
+  it('asks for the F total instead when the book writes one', () => {
+    const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, { ...marked(), foulsKind: 'total' });
+    expect(t.regions.find((r) => r.id === 'players')!.columns?.[1].label).toBe('fouls (F total)');
+  });
+
+  it('reads game details as one joined image of their boxes', () => {
+    const t = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, marked());
+    const details = t.regions.find((r) => r.id === REGION.details)!;
+    expect(details.pieces?.map((p) => p.label)).toEqual(['team name', "coach's name", 'where the game was played', 'date']);
+    expect(Object.keys((details.schema as { properties: object }).properties)).toEqual(['team_name', 'coach', 'location', 'date']);
+  });
+
+  it('skips the whole-page summary only when everything it covers is marked', () => {
+    expect(applyTemplate(SCOREBOOK_PAGE_TEMPLATE, marked()).regions.map((r) => r.id)).not.toContain('summary');
+    const noQuarters = { ...marked(), enabled: marked().enabled.filter((id) => id !== 'quarters') };
+    const ids = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, noQuarters).regions.map((r) => r.id);
+    expect(ids).toContain('summary');
+    expect(ids).not.toContain(REGION.quarters);
+  });
+
+  it('leaves out parts that are switched off or not marked', () => {
+    const t = { ...marked(), enabled: REQUIRED_PARTS };
+    const players = applyTemplate(SCOREBOOK_PAGE_TEMPLATE, t).regions.find((r) => r.id === 'players')!;
+    expect(players.columns).toHaveLength(2);
+    expect(players.prompt).toContain('use null for f');
+    expect(isUsable(t)).toBe(true);
+    expect(isUsable({ ...t, parts: { rows: t.parts.rows } })).toBe(false);
+    expect(unmarkedParts({ ...marked(), parts: {} })[0]).toBe('rows');
+  });
+
+  it('keeps bands inside the rows box and boxes inside the page', () => {
+    const t = normalizeTemplate({
+      ...marked(),
+      parts: { rows: { x: 0.9, y: -0.2, w: 0.5, h: 2 }, names: { x: 0, w: 0.5 }, coach: { x: 1.2, y: 0.5, w: 0.3, h: 0.1 } },
     });
-    expect(l.table.x + l.table.w).toBeLessThanOrEqual(1);
-    expect(l.table.y).toBe(0);
-    expect(l.nameColumn.x).toBeGreaterThanOrEqual(l.table.x);
-    expect(l.pointsColumn.x + l.pointsColumn.w).toBeLessThanOrEqual(l.table.x + l.table.w + 1e-9);
+    const rows = t.parts.rows as { x: number; y: number; w: number; h: number };
+    expect(rows.x + rows.w).toBeLessThanOrEqual(1);
+    expect(rows.y).toBe(0);
+    expect(t.parts.names!.x).toBeGreaterThanOrEqual(rows.x);
+    expect(t.parts.coach!.x + t.parts.coach!.w).toBeLessThanOrEqual(1);
+  });
+
+  it('turns a layout saved before templates into a template', () => {
+    const t = fromLegacyLayout(
+      { version: 1, table: { x: 0.1, y: 0.3, w: 0.8, h: 0.5 }, nameColumn: { x: 0.12, w: 0.2 }, pointsColumn: { x: 0.8, w: 0.04 }, teamName: { x: 0.1, y: 0.02, w: 0.3, h: 0.05 } },
+      'legacy',
+    );
+    expect(markedParts(t)).toEqual(['rows', 'names', 'points', 'teamName']);
+    expect(isUsable(t)).toBe(true);
+  });
+
+  it('fills the box score from the marked boxes, preferring them over the whole page', () => {
+    const run: ExtractionRun = {
+      templateId: SCOREBOOK_PAGE_TEMPLATE.id,
+      templateVersion: SCOREBOOK_PAGE_TEMPLATE.version,
+      modelId: 'test',
+      sourceUri: 'page',
+      startedAt: 0,
+      finishedAt: 1,
+      results: [
+        result('summary', 0, { team_name: 'W.B. WOB', location: 'Henley', period_scores: [1, 2, 3, 4], final_score: 10, timeouts_used: 0 }),
+        result(REGION.details, 0, { team_name: ' Stars ', coach: 'Daly', date: '12-15-14' }),
+        result(REGION.quarters, 0, { period_scores: [15, 26, 39, 50, 0], final_score: 50 }),
+        result(REGION.timeouts, 0, { timeouts_used: 5 }),
+        result(REGION.teamFouls, 0, { team_fouls: [5, 4] }),
+      ],
+    };
+    const page = readPage(run);
+    expect(page.team).toMatchObject({
+      name: 'Stars',
+      coach: 'Daly',
+      periodScores: [15, 11, 13, 11],
+      totalPoints: 50,
+      timeoutsUsed: 5,
+      teamFouls: [5, 4],
+    });
+    expect(page.date).toBe('12-15-14');
+    expect(page.location).toBe('Henley');
+    expect(page.team.crops.map((c) => c.regionId)).toEqual(['summary', 'details', 'quarters', 'timeouts', 'team_fouls']);
   });
 });
 
@@ -320,5 +409,35 @@ describe('isPlayerName', () => {
     expect(isPlayerName('Player Scoring')).toBe(false);
     expect(isPlayerName('14')).toBe(false);
     expect(isPlayerName(null)).toBe(false);
+  });
+});
+
+describe('templateChecks', () => {
+  it('passes parts that were read and cross-check, and explains the ones that do not', () => {
+    const t = {
+      ...newTemplate('t', 'x', null, 0),
+      enabled: [...REQUIRED_PARTS, 'fouls', 'coach', 'quarters'] as ScorebookTemplate['enabled'],
+      parts: {
+        rows: { x: 0, y: 0.3, w: 1, h: 0.6 },
+        names: { x: 0, w: 0.2 },
+        points: { x: 0.9, w: 0.05 },
+        fouls: { x: 0.5, w: 0.1 },
+        coach: { x: 0.4, y: 0, w: 0.2, h: 0.05 },
+        quarters: { x: 0.7, y: 0.1, w: 0.3, h: 0.1 },
+      },
+    };
+    const team = {
+      ...emptyTeam(),
+      periodScores: [3, 2, 1, 0],
+      totalPoints: 6,
+      players: [player({ number: '5', name: 'A', points: 4, fouls: 1 }), player({ number: '6', name: 'B', points: 2 })],
+    };
+    const checks = templateChecks(t, { team, opponent: null, date: null, location: null, failures: [], notes: [] });
+    const by = Object.fromEntries(checks.map((c) => [c.part, c]));
+    expect(checks.map((c) => c.part)).toEqual(['rows', 'names', 'points', 'fouls', 'coach', 'quarters']);
+    expect(by.points).toMatchObject({ ok: true, value: 'add up to 6 ✓' });
+    expect(by.quarters).toMatchObject({ ok: true });
+    expect(by.fouls).toMatchObject({ ok: false, value: '1 read, 1 unclear' });
+    expect(by.coach).toMatchObject({ ok: false, value: 'Not read' });
   });
 });

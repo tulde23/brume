@@ -1,5 +1,6 @@
 import { resultsFor, type ExtractionRun } from '@brume/ocr-engine';
 
+import { REGION } from './scorebook';
 import { emptyTeam, type PlayerLine, type TeamSheet } from './types';
 
 /** Short keys from template.ts (each key repeats on every row, so short keys save real time). */
@@ -24,6 +25,14 @@ export function perPeriodScores(
   written: (number | null)[],
   final: number | null,
 ): { scores: (number | null)[]; wasCumulative: boolean } {
+  // An empty or zeroed overtime box (Ø) means no overtime; it would otherwise
+  // break the "never goes down" test for running totals.
+  let end = written.length;
+  while (end > 4 && (written[end - 1] === null || written[end - 1] === 0)) end--;
+  if (end < written.length) {
+    const r = perPeriodScores(written.slice(0, end), final);
+    return { scores: [...r.scores, ...written.slice(end)], wasCumulative: r.wasCumulative };
+  }
   const filled = written.filter((n): n is number => n !== null);
   const lastFilled = written.reduce<number>((at, n, i) => (n !== null ? i : at), -1);
   const contiguous = lastFilled >= 1 && written.slice(0, lastFilled + 1).every((n) => n !== null);
@@ -106,21 +115,39 @@ export function readPage(run: ExtractionRun): PageReading {
   team.pageUri = run.sourceUri;
   const failures: string[] = [];
 
+  const notes: string[] = [];
   const [summary] = resultsFor(run, 'summary');
   const s = summary?.data as RawSummary | null;
   if (summary) team.crops.push({ regionId: 'summary', uri: summary.imageUri });
-  if (!s) failures.push('summary');
-  const notes: string[] = [];
-  if (s) {
-    team.name = s.team_name;
-    const { scores, wasCumulative } = perPeriodScores(s.period_scores, s.final_score);
+  if (summary && !s) failures.push('summary');
+
+  // Marked boxes are read up close, so each one beats the whole-page summary.
+  const boxed = <T,>(regionId: string): T | null => {
+    const [r] = resultsFor(run, regionId);
+    if (!r) return null;
+    team.crops.push({ regionId, uri: r.imageUri });
+    if (!r.data) failures.push(regionId.replace('_', ' '));
+    return (r.data as T | null) ?? null;
+  };
+  const details = boxed<{ team_name?: string | null; coach?: string | null; location?: string | null; date?: string | null }>(REGION.details);
+  const quarters = boxed<{ period_scores: (number | null)[]; final_score: number | null }>(REGION.quarters);
+  const timeouts = boxed<{ timeouts_used: number | null }>(REGION.timeouts);
+  const teamFouls = boxed<{ team_fouls: (number | null)[] }>(REGION.teamFouls);
+  const text = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
+
+  team.name = text(details?.team_name) ?? s?.team_name ?? null;
+  team.coach = text(details?.coach);
+  const scoreSource = quarters ?? s;
+  if (scoreSource) {
+    const { scores, wasCumulative } = perPeriodScores(scoreSource.period_scores ?? [], scoreSource.final_score);
     if (wasCumulative) notes.push('Score by period was written as running totals; converted to points per period.');
     // An overtime box holding 0 (often a slashed Ø) means no overtime was played.
     const periods = scores.filter((n, i) => i < 4 || (n !== null && n !== 0));
     team.periodScores = [...periods, ...Array(Math.max(0, 4 - periods.length)).fill(null)];
-    team.totalPoints = s.final_score;
-    team.timeoutsUsed = s.timeouts_used;
+    team.totalPoints = scoreSource.final_score;
   }
+  team.timeoutsUsed = timeouts ? timeouts.timeouts_used : (s?.timeouts_used ?? null);
+  team.teamFouls = teamFouls?.team_fouls ?? [];
 
   const rows: PlayerLine[] = [];
   for (const tile of resultsFor(run, 'players')) {
@@ -171,12 +198,12 @@ export function readPage(run: ExtractionRun): PageReading {
   }
 
   // Models confuse "Played at: Henley" with the opponent; a name equal to the location isn't an opponent.
-  const location = s?.location ?? null;
+  const location = text(details?.location) ?? s?.location ?? null;
   const sameText = (a: string | null, b: string | null) =>
     !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
   const opponent = sameText(s?.opponent ?? null, location) ? null : (s?.opponent ?? null);
 
-  return { team, opponent, date: s?.date ?? null, location, failures, notes };
+  return { team, opponent, date: text(details?.date) ?? s?.date ?? null, location, failures, notes };
 }
 
 /** Best-effort date normalization to yyyy-mm-dd; returns null when unsure. */

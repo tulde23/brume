@@ -17,6 +17,10 @@ export interface TeamSheet {
   periodScores: (number | null)[];
   totalPoints: number | null;
   timeoutsUsed: number | null;
+  /** Optional: games saved before templates lack these. */
+  coach?: string | null;
+  /** Team fouls per half (or quarter), in book order. */
+  teamFouls?: (number | null)[];
   players: PlayerLine[];
   /** Page photo and the crops that were read, for side-by-side review. */
   pageUri: string | null;
@@ -49,6 +53,8 @@ export const emptyTeam = (): TeamSheet => ({
   periodScores: [null, null, null, null],
   totalPoints: null,
   timeoutsUsed: null,
+  coach: null,
+  teamFouls: [],
   players: [],
   pageUri: null,
   crops: [],
