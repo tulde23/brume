@@ -7,7 +7,7 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { listGames } from '@/db';
+import { READ_IN_PROGRESS_KEY, clearSetting, getSetting, listGames } from '@/db';
 import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@brume/basketball';
 import { getActiveModelId } from '@/engine/host';
 import { Badge, Button, Card, StatusDot, T } from '@/ui/components';
@@ -19,6 +19,7 @@ export default function Home() {
   const c = useColors();
   const [games, setGames] = useState<Game[]>([]);
   const [model, setModel] = useState<{ spec: ModelSpec; ready: boolean } | null>(null);
+  const [killedMidRead, setKilledMidRead] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -26,9 +27,11 @@ export default function Home() {
       (async () => {
         const spec = getModel(await getActiveModelId(db));
         const list = await listGames(db);
+        const interrupted = (await getSetting(db, READ_IN_PROGRESS_KEY)) !== null;
         if (!live) return;
         setModel({ spec, ready: modelStatus(spec) === 'ready' });
         setGames(list);
+        setKilledMidRead(interrupted);
       })();
       return () => {
         live = false;
@@ -72,6 +75,25 @@ export default function Home() {
               </Pressable>
               </View>
             </View>
+
+            {killedMidRead && (
+              <Card style={{ backgroundColor: c.errorBg, borderColor: c.error }}>
+                <T style={[base.h2, { color: c.error }]}>Reading was interrupted</T>
+                <T>
+                  Android closed Brume while it was reading a page, almost always because the phone ran
+                  low on memory. Close other apps and try again.
+                  {model ? ` ${model.spec.name} needs about ${(model.spec.approxRamBytes / 1e9).toFixed(1)} GB free.` : ''}
+                </T>
+                <Button
+                  title="OK"
+                  kind="secondary"
+                  onPress={() => {
+                    setKilledMidRead(false);
+                    void clearSetting(db, READ_IN_PROGRESS_KEY);
+                  }}
+                />
+              </Card>
+            )}
 
             {model && !model.ready ? (
               <Card style={{ backgroundColor: c.warnBg, borderColor: c.warnLine }}>

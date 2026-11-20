@@ -102,10 +102,18 @@ export interface ExtractionRun {
 }
 
 export interface ExtractionProgress {
+  /** Crops finished so far, out of `total`. */
   done: number;
   total: number;
   regionId: string;
   tileIndex: number;
+  tileCount: number;
+  /** 'looking': encoding the image (no visible output); 'writing': generating tokens. */
+  phase: 'looking' | 'writing' | 'finished';
+  /** Tokens written so far for the current crop. */
+  tokens: number;
+  /** The current crop's output budget, for a within-crop progress estimate. */
+  maxTokens: number;
 }
 
 /**
@@ -115,7 +123,7 @@ export interface ExtractionProgress {
  */
 export interface VisionBackend {
   readonly modelId: string;
-  generate(request: GenerateRequest): Promise<string>;
+  generate(request: GenerateRequest): Promise<GenerateResult>;
 }
 
 export interface GenerateRequest {
@@ -124,9 +132,18 @@ export interface GenerateRequest {
   prompt: string;
   /** Plain JSON Schema (already converted from FieldSchema). */
   jsonSchema?: object;
-  maxTokens?: number;
+  maxTokens: number;
   temperature?: number;
   signal?: AbortSignal;
+  /** Called as tokens are produced (count so far). The first call marks the end of image encoding. */
+  onToken?: (count: number) => void;
+}
+
+export interface GenerateResult {
+  text: string;
+  /** True when generation stopped at maxTokens: the output is cut off, so retrying with the same budget is pointless. */
+  hitTokenLimit: boolean;
+  tokens: number;
 }
 
 /** Image operations the pipeline needs, abstracted so the pipeline is testable off-device. */

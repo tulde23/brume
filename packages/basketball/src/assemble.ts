@@ -2,15 +2,41 @@ import { resultsFor, type ExtractionRun } from '@brume/ocr-engine';
 
 import { emptyTeam, type PlayerLine, type TeamSheet } from './types';
 
+/** Short keys from template.ts (each key repeats on every row, so short keys save real time). */
 interface RawPlayer {
-  number: string | null;
+  no: string | null;
   name: string | null;
-  fouls: number | null;
-  field_goals_2pt: number | null;
-  field_goals_3pt: number | null;
-  free_throws_made: number | null;
-  free_throws_attempted: number | null;
-  total_points: number | null;
+  tp: number | null;
+  f: number | null;
+  p2: number | null;
+  p3: number | null;
+  ftm: number | null;
+  fta: number | null;
+}
+
+/**
+ * Many scorebooks write the score by period as a running total (15, 26, 39, 50)
+ * rather than points per period (15, 11, 13, 11). If the numbers never go
+ * down and don't already add up to the final, treat them as running totals.
+ */
+export function perPeriodScores(
+  written: (number | null)[],
+  final: number | null,
+): { scores: (number | null)[]; wasCumulative: boolean } {
+  const filled = written.filter((n): n is number => n !== null);
+  const lastFilled = written.reduce<number>((at, n, i) => (n !== null ? i : at), -1);
+  const contiguous = lastFilled >= 1 && written.slice(0, lastFilled + 1).every((n) => n !== null);
+  const nonDecreasing = filled.every((n, i) => i === 0 || n >= filled[i - 1]);
+  const sum = filled.reduce((a, b) => a + b, 0);
+  const lastValue = filled[filled.length - 1];
+  const looksCumulative =
+    contiguous && nonDecreasing && sum !== final && (final === null || lastValue <= final);
+  if (!looksCumulative) return { scores: written, wasCumulative: false };
+  const scores = written.map((n, i) => {
+    if (n === null || i > lastFilled) return n;
+    return i === 0 ? n : n - (written[i - 1] as number);
+  });
+  return { scores, wasCumulative: true };
 }
 
 interface RawSummary {
@@ -30,6 +56,8 @@ export interface PageReading {
   location: string | null;
   /** Regions the model failed on entirely. */
   failures: string[];
+  /** Automatic corrections worth telling the user about. */
+  notes: string[];
 }
 
 const filled = (p: PlayerLine) =>
@@ -71,9 +99,13 @@ export function readPage(run: ExtractionRun): PageReading {
   const s = summary?.data as RawSummary | null;
   if (summary) team.crops.push({ regionId: 'summary', uri: summary.imageUri });
   if (!s) failures.push('summary');
+  const notes: string[] = [];
   if (s) {
     team.name = s.team_name;
-    const periods = s.period_scores.length ? s.period_scores : [null, null, null, null];
+    const { scores, wasCumulative } = perPeriodScores(s.period_scores, s.final_score);
+    if (wasCumulative) notes.push('Score by period was written as running totals; converted to points per period.');
+    // An overtime box holding 0 (often a slashed Ø) means no overtime was played.
+    const periods = scores.filter((n, i) => i < 4 || (n !== null && n !== 0));
     team.periodScores = [...periods, ...Array(Math.max(0, 4 - periods.length)).fill(null)];
     team.totalPoints = s.final_score;
     team.timeoutsUsed = s.timeouts_used;
@@ -89,14 +121,14 @@ export function readPage(run: ExtractionRun): PageReading {
     }
     players.forEach((p, i) =>
       rows.push({
-        number: p.number,
+        number: p.no,
         name: p.name,
-        fouls: p.fouls,
-        fg2: p.field_goals_2pt,
-        fg3: p.field_goals_3pt,
-        ftMade: p.free_throws_made,
-        ftAttempted: p.free_throws_attempted,
-        points: p.total_points,
+        fouls: p.f,
+        fg2: p.p2,
+        fg3: p.p3,
+        ftMade: p.ftm,
+        ftAttempted: p.fta,
+        points: p.tp,
         readNotes: tile.warnings
           .filter((w) => w.startsWith(`$.players[${i}]`))
           .map((w) => w.replace(/^\$\.players\[\d+\]\./, '')),
@@ -104,6 +136,14 @@ export function readPage(run: ExtractionRun): PageReading {
     );
   }
   team.players = mergePlayers(rows);
+
+  // Player tables always have names. Nameless rows next to named ones are almost
+  // always numbers picked up from a nearby grid (running score, team fouls).
+  const named = team.players.filter((p) => p.name);
+  if (named.length >= 3 && named.length < team.players.length) {
+    notes.push(`Dropped ${team.players.length - named.length} row(s) with a number but no player name.`);
+    team.players = named;
+  }
 
   // Fill a missing points column from the marks when every part is known.
   for (const p of team.players) {
@@ -113,7 +153,13 @@ export function readPage(run: ExtractionRun): PageReading {
     }
   }
 
-  return { team, opponent: s?.opponent ?? null, date: s?.date ?? null, location: s?.location ?? null, failures };
+  // Models confuse "Played at: Henley" with the opponent; a name equal to the location isn't an opponent.
+  const location = s?.location ?? null;
+  const sameText = (a: string | null, b: string | null) =>
+    !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+  const opponent = sameText(s?.opponent ?? null, location) ? null : (s?.opponent ?? null);
+
+  return { team, opponent, date: s?.date ?? null, location, failures, notes };
 }
 
 /** Best-effort date normalization to yyyy-mm-dd; returns null when unsure. */

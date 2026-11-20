@@ -36,16 +36,21 @@ const fakeImages: ImageOps = {
   crop: async (_uri, rect) => `crop://${rect.originY}`,
 };
 
-function fakeBackend(replies: string[]): VisionBackend & { calls: GenerateRequest[] } {
+/** A reply is the text, or { text, cut } to simulate stopping at the token limit. */
+type Reply = string | { text: string; cut: true };
+
+function fakeBackend(replies: Reply[]): VisionBackend & { calls: GenerateRequest[] } {
   const calls: GenerateRequest[] = [];
   return {
     modelId: 'fake',
     calls,
     generate: async (req) => {
-      calls.push(req);
+      calls.push({ ...req });
       const next = replies.shift();
       if (next === undefined) throw new Error('no more replies');
-      return next;
+      const text = typeof next === 'string' ? next : next.text;
+      for (let n = 1; n <= 3; n++) req.onToken?.(n);
+      return { text, hitTokenLimit: typeof next !== 'string', tokens: 3 };
     },
   };
 }
@@ -90,6 +95,46 @@ describe('runTemplate', () => {
     expect(run.results[0].data).toBeNull();
     expect(run.results[0].error).toMatch(/No JSON/);
     expect(run.results[1].data).toEqual({ n: 2 });
+  });
+
+  it('gives a cut-off answer a bigger budget instead of a warmer retry', async () => {
+    const backend = fakeBackend([{ text: '{"n": 1', cut: true }, '{"n": 1}', '{"n": 2}']);
+    const run = await runTemplate(backend, fakeImages, 'page.jpg', template);
+    expect(run.results[0]).toMatchObject({ data: { n: 1 }, attempts: 2 });
+    expect(backend.calls.map((c) => [c.maxTokens, c.temperature])).toEqual([
+      [1024, 0],
+      [2048, 0],
+      [1024, 0],
+    ]);
+  });
+
+  it('gives up on a cut-off answer once the budget is at its ceiling', async () => {
+    const big: DocumentTemplate = {
+      ...template,
+      regions: [{ ...template.regions[0], tiles: undefined, maxTokens: 2048 }],
+    };
+    const backend = fakeBackend([{ text: '{"n": ', cut: true }, '{"n": 9}']);
+    const run = await runTemplate(backend, fakeImages, 'page.jpg', big);
+    expect(run.results[0]).toMatchObject({ data: null, attempts: 1, error: 'Answer was cut off at 2048 tokens' });
+    expect(backend.calls).toHaveLength(1);
+  });
+
+  it('reports looking, then writing with token counts, then finished', async () => {
+    const seen: string[] = [];
+    await runTemplate(fakeBackend(['{"n": 1}', '{"n": 2}']), fakeImages, 'page.jpg', template, {
+      onProgress: (p) => seen.push(`${p.done}/${p.total} ${p.phase}${p.phase === 'writing' ? ` ${p.tokens}` : ''}`),
+    });
+    expect(seen).toEqual([
+      '0/2 looking',
+      '0/2 writing 1',
+      '0/2 writing 2',
+      '0/2 writing 3',
+      '1/2 looking',
+      '1/2 writing 1',
+      '1/2 writing 2',
+      '1/2 writing 3',
+      '2/2 finished',
+    ]);
   });
 
   it('stops when cancelled', async () => {

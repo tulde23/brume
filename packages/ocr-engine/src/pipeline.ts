@@ -4,6 +4,7 @@ import type {
   DocumentTemplate,
   ExtractionProgress,
   ExtractionRun,
+  GenerateResult,
   ImageOps,
   RegionResult,
   RegionSpec,
@@ -20,6 +21,9 @@ export interface RunOptions {
 }
 
 const DEFAULT_MAX_SIDE = 1024;
+const DEFAULT_MAX_TOKENS = 1024;
+/** Hard ceiling when a cut-off answer earns a bigger budget on retry. */
+const MAX_TOKEN_CEILING = 2048;
 
 export function buildPrompt(template: DocumentTemplate, region: RegionSpec, tile: number, tiles: number) {
   const part =
@@ -31,8 +35,24 @@ export function buildPrompt(template: DocumentTemplate, region: RegionSpec, tile
     `${region.prompt}${part}\n\n` +
     'Respond with JSON only, in exactly this shape:\n' +
     describeSchema(region.schema) +
-    '\nUse null for anything blank or unreadable. Do not guess.'
+    '\nUse null for anything blank or unreadable. Do not guess, and do not repeat a value just because the row above had it.'
   );
+}
+
+/**
+ * Decide what the next attempt should change. A parse failure after a normal
+ * stop is often a fluke worth one warmer retry; output that hit the token cap
+ * will be cut off again unless the budget grows.
+ */
+export function nextAttempt(
+  last: Pick<GenerateResult, 'hitTokenLimit'>,
+  maxTokens: number,
+): { maxTokens: number; temperature: number } | null {
+  if (last.hitTokenLimit) {
+    if (maxTokens >= MAX_TOKEN_CEILING) return null;
+    return { maxTokens: Math.min(MAX_TOKEN_CEILING, maxTokens * 2), temperature: 0 };
+  }
+  return { maxTokens, temperature: 0.3 };
 }
 
 /** Read every region of a page image with the given backend. */
@@ -61,7 +81,19 @@ export async function runTemplate(
   const results: RegionResult[] = [];
   for (const [i, job] of jobs.entries()) {
     if (options.signal?.aborted) throw new Error('Extraction cancelled');
-    options.onProgress?.({ done: i, total: jobs.length, regionId: job.region.id, tileIndex: job.tileIndex });
+    let maxTokens = job.region.maxTokens ?? DEFAULT_MAX_TOKENS;
+    const report = (phase: ExtractionProgress['phase'], tokens: number) =>
+      options.onProgress?.({
+        done: i,
+        total: jobs.length,
+        regionId: job.region.id,
+        tileIndex: job.tileIndex,
+        tileCount: job.tileCount,
+        phase,
+        tokens,
+        maxTokens,
+      });
+    report('looking', 0);
 
     const t0 = Date.now();
     const imageUri = await images.crop(
@@ -78,19 +110,22 @@ export async function runTemplate(
     let data: unknown = null;
     let warnings: string[] = [];
     let attempts = 0;
+    let temperature = 0;
+    let last: GenerateResult | null = null;
     while (attempts < maxAttempts) {
       attempts++;
       try {
-        raw = await backend.generate({
+        last = await backend.generate({
           imageUri,
           system: template.systemPrompt,
           prompt,
           jsonSchema,
-          maxTokens: job.region.maxTokens,
-          // Deterministic first; nudge on retry so we do not repeat the same failure.
-          temperature: attempts === 1 ? 0 : 0.3,
+          maxTokens,
+          temperature,
           signal: options.signal,
+          onToken: (n) => report('writing', n),
         });
+        raw = last.text;
         const coerced = coerce(job.region.schema, extractJson(raw));
         data = coerced.value;
         warnings = coerced.warnings;
@@ -99,6 +134,12 @@ export async function runTemplate(
       } catch (e) {
         if (options.signal?.aborted) throw e;
         error = e instanceof Error ? e.message : String(e);
+        if (last?.hitTokenLimit) error = `Answer was cut off at ${maxTokens} tokens`;
+        const next = last ? nextAttempt(last, maxTokens) : { maxTokens, temperature: 0.3 };
+        if (!next) break;
+        maxTokens = next.maxTokens;
+        temperature = next.temperature;
+        last = null;
       }
     }
 
@@ -116,7 +157,16 @@ export async function runTemplate(
       durationMs: Date.now() - t0,
     });
   }
-  options.onProgress?.({ done: jobs.length, total: jobs.length, regionId: '', tileIndex: 0 });
+  options.onProgress?.({
+    done: jobs.length,
+    total: jobs.length,
+    regionId: '',
+    tileIndex: 0,
+    tileCount: 0,
+    phase: 'finished',
+    tokens: 0,
+    maxTokens: 0,
+  });
 
   return {
     templateId: template.id,

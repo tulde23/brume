@@ -13,6 +13,11 @@ export interface ModelSpec {
   model: ModelFile;
   /** Vision projector that turns images into tokens the model can read. */
   mmproj: ModelFile;
+  /**
+   * Tokens of KV cache to reserve. One region needs at most image tokens + ~500 prompt
+   * + maxTokens output, so keep this near 2x that: every 4096 tokens of a 2B model's
+   * cache costs ~350 MB, and Android kills the app outright when memory runs short.
+   */
   contextSize: number;
   /** Upper bound on tokens per image. More reads finer handwriting, costs time and memory. */
   imageMaxTokens: number;
@@ -39,9 +44,9 @@ export const MODEL_CATALOG: ModelSpec[] = [
       sizeBytes: 445_053_056,
       sha256: '69066c8f279ec85ff48ab4059f6ebba0d2932ca57667f2bbdac7d9805bca9e7b',
     },
-    contextSize: 8192,
-    imageMaxTokens: 1536,
-    approxRamBytes: 3.2e9,
+    contextSize: 4096,
+    imageMaxTokens: 1024,
+    approxRamBytes: 2.9e9,
   },
   {
     id: 'qwen2.5-vl-3b-q4',
@@ -59,9 +64,9 @@ export const MODEL_CATALOG: ModelSpec[] = [
       sizeBytes: 844_757_728,
       sha256: '980c9b2f78c04e6cff93d277ada09e768394f112d75db3b4e9dea8a69f9fb904',
     },
-    contextSize: 8192,
-    imageMaxTokens: 1536,
-    approxRamBytes: 4e9,
+    contextSize: 4096,
+    imageMaxTokens: 1024,
+    approxRamBytes: 3.6e9,
   },
 ];
 

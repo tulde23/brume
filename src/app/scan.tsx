@@ -1,10 +1,11 @@
+import type { ExtractionProgress } from '@brume/ocr-engine';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, View } from 'react-native';
 
-import { saveGame } from '@/db';
+import { READ_IN_PROGRESS_KEY, clearSetting, saveGame, setSetting } from '@/db';
 import {
   SCOREBOOK_PAGE_TEMPLATE,
   emptyTeam,
@@ -24,13 +25,41 @@ const REGION_LABELS: Record<string, string> = Object.fromEntries(
   SCOREBOOK_PAGE_TEMPLATE.regions.map((r) => [r.id, r.label.toLowerCase()]),
 );
 
-type Status = { text: string; fraction: number } | null;
+type Status = { text: string; detail: string; fraction: number; startedAt: number } | null;
+
+/** Within one crop: encoding the image is roughly the first 40%, writing the answer the rest. */
+function cropFraction(p: ExtractionProgress): number {
+  if (p.phase === 'finished') return 1;
+  if (p.phase === 'looking') return 0.05;
+  return 0.4 + 0.6 * Math.min(1, p.tokens / Math.max(1, p.maxTokens * 0.6));
+}
+
+function describeProgress(side: Side, p: ExtractionProgress): { text: string; detail: string } {
+  const what = REGION_LABELS[p.regionId] ?? 'finishing';
+  const part = p.tileCount > 1 ? ` (${p.tileIndex + 1} of ${p.tileCount})` : '';
+  const detail =
+    p.phase === 'looking' ? 'Looking at the page…' : p.phase === 'writing' ? `Writing results… ${p.tokens} tokens` : '';
+  return { text: `Reading ${side} page: ${what}${part}`, detail };
+}
+
+function useElapsed(since: number | null): string {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (since === null) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [since]);
+  if (since === null) return '';
+  const s = Math.max(0, Math.round((now - since) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
 
 export default function Scan() {
   const db = useSQLiteContext();
   const c = useColors();
   const [pages, setPages] = useState<Record<Side, string | null>>({ home: null, away: null });
   const [status, setStatus] = useState<Status>(null);
+  const elapsed = useElapsed(status?.startedAt ?? null);
   const abort = useRef<AbortController | null>(null);
 
   useEffect(() => () => abort.current?.abort(), []);
@@ -60,20 +89,26 @@ export default function Scan() {
     abort.current = new AbortController();
     const signal = abort.current.signal;
     const id = newId();
+    // If Android kills Brume for memory mid-read, nothing in JS runs; this marker lets
+    // the next launch explain what happened instead of silently landing on Home.
+    await setSetting(db, READ_IN_PROGRESS_KEY, String(Date.now()));
     try {
       const modelId = await getActiveModelId(db);
       const sides = (['home', 'away'] as const).filter((s) => pages[s]);
       const readings: Partial<Record<Side, PageReading>> = {};
+      const startedAt = Date.now();
 
       for (const [i, side] of sides.entries()) {
         const uri = keepImage(pages[side]!, id, side);
         const run = await extract(modelId, uri, SCOREBOOK_PAGE_TEMPLATE, {
           signal,
-          onModelLoad: (f) => setStatus({ text: 'Loading the reading model…', fraction: f }),
+          onModelLoad: (f) =>
+            setStatus({ text: 'Loading the reading model…', detail: '', fraction: f, startedAt }),
           onProgress: (p) =>
             setStatus({
-              text: `Reading ${side} page: ${REGION_LABELS[p.regionId] ?? 'finishing'}`,
-              fraction: (i + p.done / p.total) / sides.length,
+              ...describeProgress(side, p),
+              fraction: (i + (p.done + cropFraction(p)) / Math.max(1, p.total)) / sides.length,
+              startedAt,
             }),
         });
         const reading = readPage(run);
@@ -105,16 +140,20 @@ export default function Scan() {
       await saveGame(db, game);
 
       const failures = sides.flatMap((s) => readings[s]!.failures.map((f) => `${s}: ${f}`));
+      const notes = sides.flatMap((s) => readings[s]!.notes.map((n) => `${s}: ${n}`));
       if (failures.length) {
         Alert.alert(
           'Some parts could not be read',
           `${failures.join('\n')}\n\nYou can fill these in by hand on the next screen.`,
         );
+      } else if (notes.length) {
+        Alert.alert('Adjusted while reading', notes.join('\n'));
       }
       router.replace({ pathname: '/game/[id]', params: { id } });
     } catch (e) {
       if (!signal.aborted) Alert.alert('Reading failed', e instanceof Error ? e.message : String(e));
     } finally {
+      await clearSetting(db, READ_IN_PROGRESS_KEY);
       setStatus(null);
       abort.current = null;
     }
@@ -125,7 +164,11 @@ export default function Scan() {
       <View style={[base.screen, base.content, { backgroundColor: c.bg, justifyContent: 'center' }]}>
         <T style={base.h2}>{status.text}</T>
         <ProgressBar fraction={status.fraction} />
-        <T muted>This takes a minute or two per page. Keep Brume open.</T>
+        <View style={[base.row, { justifyContent: 'space-between' }]}>
+          <T muted style={base.small}>{status.detail}</T>
+          <T muted style={[base.small, base.num]}>{elapsed}</T>
+        </View>
+        <T muted>This takes a minute or two per page on most phones. Keep Brume open.</T>
         <Button title="Cancel" kind="secondary" onPress={() => abort.current?.abort()} />
       </View>
     );

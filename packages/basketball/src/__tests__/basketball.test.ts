@@ -5,6 +5,7 @@ import {
   gameToCsv,
   mergePlayers,
   normalizeDate,
+  perPeriodScores,
   readPage,
   seasonFor,
   seasonTotals,
@@ -39,15 +40,16 @@ const result = (regionId: string, tileIndex: number, data: unknown, warnings: st
   durationMs: 1,
 });
 
-const raw = (number: string, name: string, pts: number | null, extra: object = {}) => ({
-  number,
+/** A player row as the model returns it (short keys from the template). */
+const raw = (no: string, name: string, tp: number | null, extra: object = {}) => ({
+  no,
   name,
-  fouls: 1,
-  field_goals_2pt: 2,
-  field_goals_3pt: 0,
-  free_throws_made: 1,
-  free_throws_attempted: 2,
-  total_points: pts,
+  tp,
+  f: 1,
+  p2: 2,
+  p3: 0,
+  ftm: 1,
+  fta: 2,
   ...extra,
 });
 
@@ -69,7 +71,7 @@ describe('readPage', () => {
         final_score: 54,
         timeouts_used: 3,
       }),
-      result('players', 0, { players: [raw('3', 'Kim', 5), raw('11', 'Okafor', null)] }, ['$.players[1].fouls: read "1 " as 1']),
+      result('players', 0, { players: [raw('3', 'Kim', 5), raw('11', 'Okafor', null)] }, ['$.players[1].f: read "1 " as 1']),
       // Overlap: Okafor appears again in the next strip with more filled in.
       result('players', 1, { players: [raw('11', 'Okafor', 5), raw('23', 'Rivera', 5)] }),
       result('players', 2, null),
@@ -91,7 +93,7 @@ describe('readPage', () => {
   });
 
   it('keeps per-row read notes through the merge', () => {
-    expect(page.team.players[1].readNotes).toContain('fouls: read "1 " as 1');
+    expect(page.team.players[1].readNotes).toContain('f: read "1 " as 1');
   });
 
   it('reports strips the model failed on', () => {
@@ -100,6 +102,70 @@ describe('readPage', () => {
 
   it('keeps crops for review', () => {
     expect(page.team.crops.map((c) => c.regionId)).toEqual(['summary', 'players-1', 'players-2', 'players-3']);
+  });
+
+  it('fixes what the model got wrong on the real Stars sheet', () => {
+    // What Qwen3-VL 2B actually returned for the summary of the Stars training sheet.
+    const stars = readPage({
+      ...run,
+      results: [
+        result('summary', 0, {
+          team_name: 'STARS',
+          opponent: 'HENLEY',
+          date: '12-15-14',
+          location: 'Henley',
+          period_scores: [15, 26, 39, 50, 50],
+          final_score: 150,
+          timeouts_used: null,
+        }),
+      ],
+    });
+    expect(stars.team.periodScores).toEqual([15, 11, 13, 11]);
+    expect(stars.opponent).toBeNull();
+    expect(stars.location).toBe('Henley');
+    expect(stars.notes[0]).toMatch(/running totals/);
+  });
+});
+
+describe('readPage on the Stars sheet, second run', () => {
+  it('drops nameless rows picked up from the running-score grid', () => {
+    const page = readPage({
+      templateId: 'basketball.scorebook-page',
+      templateVersion: 2,
+      modelId: 'fake',
+      sourceUri: 'page.jpg',
+      startedAt: 0,
+      finishedAt: 1,
+      results: [
+        result('players', 0, {
+          players: [
+            raw('1', '', 9),
+            raw('2', '', 14),
+            raw('3', '', 7),
+            raw('4', '', 8),
+            raw('5', 'Robinson', 4),
+          ],
+        }),
+        result('players', 1, { players: [raw('11', 'Malone', 4), raw('12', 'Stockton', 3)] }),
+      ],
+    });
+    expect(page.team.players.map((p) => p.name)).toEqual(['Robinson', 'Malone', 'Stockton']);
+    expect(page.notes).toContain('Dropped 4 row(s) with a number but no player name.');
+  });
+});
+
+describe('perPeriodScores', () => {
+  it('converts running totals ending at the final', () => {
+    expect(perPeriodScores([15, 26, 39, 50], 50)).toEqual({ scores: [15, 11, 13, 11], wasCumulative: true });
+  });
+
+  it('leaves real per-period scores alone, even when they rise', () => {
+    expect(perPeriodScores([10, 12, 14, 16], 52)).toEqual({ scores: [10, 12, 14, 16], wasCumulative: false });
+    expect(perPeriodScores([12, 15, 11, 16], 54).wasCumulative).toBe(false);
+  });
+
+  it('does not guess with gaps', () => {
+    expect(perPeriodScores([15, null, 39, 50], 50).wasCumulative).toBe(false);
   });
 });
 

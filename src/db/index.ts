@@ -102,6 +102,13 @@ export async function getSetting(db: SQLiteDatabase, key: string): Promise<strin
   return row?.value ?? null;
 }
 
+/** Set while a page is being read; still present at launch means the OS killed the app mid-read. */
+export const READ_IN_PROGRESS_KEY = 'scan.readInProgress';
+
+export async function clearSetting(db: SQLiteDatabase, key: string): Promise<void> {
+  await db.runAsync('DELETE FROM settings WHERE key = ?', key);
+}
+
 export async function setSetting(db: SQLiteDatabase, key: string, value: string): Promise<void> {
   await db.runAsync(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',

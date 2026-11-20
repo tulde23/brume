@@ -1,7 +1,7 @@
 import { initLlama, type LlamaContext, type RNLlamaOAICompatibleMessage } from 'llama.rn';
 
 import type { ModelSpec } from './models';
-import type { GenerateRequest, VisionBackend } from './types';
+import type { GenerateRequest, GenerateResult, VisionBackend } from './types';
 
 /** On-device vision backend: llama.cpp via llama.rn, with the model's mmproj for images. */
 export class LlamaVisionBackend implements VisionBackend {
@@ -23,7 +23,13 @@ export class LlamaVisionBackend implements VisionBackend {
         n_gpu_layers: 99,
         // Context shifting corrupts image tokens; llama.rn requires it off for multimodal.
         ctx_shift: false,
+        // Map weights from the file instead of copying them, so Android can page them
+        // out under pressure rather than killing the app.
+        use_mmap: true,
         use_mlock: false,
+        // 8-bit keys cut the KV cache ~25% with no measurable accuracy loss.
+        // (Quantized values would need flash attention, which not every device has.)
+        cache_type_k: 'q8_0',
       },
       (p) => onProgress?.(p / 100),
     );
@@ -39,7 +45,7 @@ export class LlamaVisionBackend implements VisionBackend {
     return new LlamaVisionBackend(ctx, spec.id, Boolean(ctx.gpu));
   }
 
-  async generate(req: GenerateRequest): Promise<string> {
+  async generate(req: GenerateRequest): Promise<GenerateResult> {
     const messages: RNLlamaOAICompatibleMessage[] = [];
     if (req.system) messages.push({ role: 'system', content: req.system });
     messages.push({
@@ -52,18 +58,26 @@ export class LlamaVisionBackend implements VisionBackend {
 
     const stop = () => void this.ctx.stopCompletion();
     req.signal?.addEventListener('abort', stop);
+    let count = 0;
     try {
-      const result = await this.ctx.completion({
-        messages,
-        response_format: req.jsonSchema
-          ? { type: 'json_schema', json_schema: { strict: true, schema: req.jsonSchema } }
-          : undefined,
-        n_predict: req.maxTokens ?? 1024,
-        temperature: req.temperature ?? 0,
-        top_k: 20,
-      });
+      const result = await this.ctx.completion(
+        {
+          messages,
+          response_format: req.jsonSchema
+            ? { type: 'json_schema', json_schema: { strict: true, schema: req.jsonSchema } }
+            : undefined,
+          n_predict: req.maxTokens,
+          temperature: req.temperature ?? 0,
+          top_k: 20,
+        },
+        () => req.onToken?.(++count),
+      );
       if (req.signal?.aborted) throw new Error('Extraction cancelled');
-      return result.content || result.text;
+      return {
+        text: result.content || result.text,
+        hitTokenLimit: Boolean(result.stopped_limit),
+        tokens: result.tokens_predicted ?? count,
+      };
     } finally {
       req.signal?.removeEventListener('abort', stop);
     }
