@@ -113,7 +113,12 @@ export function readPage(run: ExtractionRun): PageReading {
 
   const rows: PlayerLine[] = [];
   for (const tile of resultsFor(run, 'players')) {
-    team.crops.push({ regionId: `players-${tile.tileIndex + 1}`, uri: tile.imageUri });
+    tile.imageUris.forEach((uri, k) =>
+      team.crops.push({
+        regionId: `players-${tile.tileIndex + 1}${tile.imageUris.length > 1 ? String.fromCharCode(97 + k) : ''}`,
+        uri,
+      }),
+    );
     const players = (tile.data as { players: RawPlayer[] } | null)?.players;
     if (!players) {
       failures.push(`players strip ${tile.tileIndex + 1}`);
@@ -139,9 +144,10 @@ export function readPage(run: ExtractionRun): PageReading {
 
   // Player tables always have names. Nameless rows next to named ones are almost
   // always numbers picked up from a nearby grid (running score, team fouls).
-  const named = team.players.filter((p) => p.name);
+  // A "name" that is only digits is a number picked up from another grid, not a player.
+  const named = team.players.filter((p) => p.name && !/^[\d\s.,-]+$/.test(p.name));
   if (named.length >= 3 && named.length < team.players.length) {
-    notes.push(`Dropped ${team.players.length - named.length} row(s) with a number but no player name.`);
+    notes.push(`Dropped ${team.players.length - named.length} row(s) with no player name.`);
     team.players = named;
   }
 

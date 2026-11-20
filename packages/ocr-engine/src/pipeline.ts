@@ -26,13 +26,20 @@ const DEFAULT_MAX_TOKENS = 1024;
 const MAX_TOKEN_CEILING = 2048;
 
 export function buildPrompt(template: DocumentTemplate, region: RegionSpec, tile: number, tiles: number) {
+  const cols = region.columns ?? [];
+  const images =
+    cols.length > 1
+      ? `\nYou are given ${cols.length} images of the SAME rows, side by side on the page: ` +
+        cols.map((c, i) => `image ${i + 1} is the ${c.label}`).join('; ') +
+        '. Row k in one image is row k in the others; match them top to bottom.'
+      : '';
   const part =
     tiles > 1
-      ? `\nThis image is strip ${tile + 1} of ${tiles} cut from the same area, top to bottom. ` +
+      ? `\n${cols.length > 1 ? 'These images are' : 'This image is'} strip ${tile + 1} of ${tiles} cut from the same area, top to bottom. ` +
         'Rows cut off at the top or bottom edge may be partial; include them only if you can read them.'
       : '';
   return (
-    `${region.prompt}${part}\n\n` +
+    `${region.prompt}${images}${part}\n\n` +
     'Respond with JSON only, in exactly this shape:\n' +
     describeSchema(region.schema) +
     '\nUse null for anything blank or unreadable. Do not guess, and do not repeat a value just because the row above had it.'
@@ -96,11 +103,15 @@ export async function runTemplate(
     report('looking', 0);
 
     const t0 = Date.now();
-    const imageUri = await images.crop(
-      sourceUri,
-      toPixels(job.rect, width, height),
-      job.region.maxImageSide ?? DEFAULT_MAX_SIDE,
-    );
+    const maxSide = job.region.maxImageSide ?? DEFAULT_MAX_SIDE;
+    const slices = job.region.columns?.length
+      ? job.region.columns.map((c) => ({ x: c.x, y: job.rect.y, w: c.w, h: job.rect.h }))
+      : [job.rect];
+    const imageUris: string[] = [];
+    for (const slice of slices) {
+      imageUris.push(await images.crop(sourceUri, toPixels(slice, width, height), maxSide));
+    }
+    const imageUri = imageUris[0];
     const prompt = buildPrompt(template, job.region, job.tileIndex, job.tileCount);
     const jsonSchema = toJsonSchema(job.region.schema);
     const maxAttempts = 1 + (options.retries ?? 1);
@@ -116,7 +127,7 @@ export async function runTemplate(
       attempts++;
       try {
         last = await backend.generate({
-          imageUri,
+          imageUris,
           system: template.systemPrompt,
           prompt,
           jsonSchema,
@@ -149,6 +160,7 @@ export async function runTemplate(
       tileCount: job.tileCount,
       rect: job.rect,
       imageUri,
+      imageUris,
       data,
       raw,
       warnings,

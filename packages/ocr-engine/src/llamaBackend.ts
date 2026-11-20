@@ -51,7 +51,7 @@ export class LlamaVisionBackend implements VisionBackend {
     messages.push({
       role: 'user',
       content: [
-        { type: 'image_url', image_url: { url: req.imageUri } },
+        ...req.imageUris.map((url) => ({ type: 'image_url', image_url: { url } })),
         { type: 'text', text: req.prompt },
       ],
     });

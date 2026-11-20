@@ -33,6 +33,7 @@ const result = (regionId: string, tileIndex: number, data: unknown, warnings: st
   tileCount: 3,
   rect: { x: 0, y: 0, w: 1, h: 1 },
   imageUri: `crop-${regionId}-${tileIndex}`,
+  imageUris: [`crop-${regionId}-${tileIndex}`],
   data,
   raw: '',
   warnings,
@@ -142,7 +143,7 @@ describe('readPage on the Stars sheet, second run', () => {
             raw('1', '', 9),
             raw('2', '', 14),
             raw('3', '', 7),
-            raw('4', '', 8),
+            raw('4', '8', 8),
             raw('5', 'Robinson', 4),
           ],
         }),
@@ -150,7 +151,7 @@ describe('readPage on the Stars sheet, second run', () => {
       ],
     });
     expect(page.team.players.map((p) => p.name)).toEqual(['Robinson', 'Malone', 'Stockton']);
-    expect(page.notes).toContain('Dropped 4 row(s) with a number but no player name.');
+    expect(page.notes).toContain('Dropped 4 row(s) with no player name.');
   });
 });
 

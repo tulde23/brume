@@ -97,6 +97,37 @@ describe('runTemplate', () => {
     expect(run.results[1].data).toEqual({ n: 2 });
   });
 
+  it('sends one image per column slice, cropped to each strip', async () => {
+    const crops: string[] = [];
+    const recording: ImageOps = {
+      size: async () => ({ width: 1000, height: 1000 }),
+      crop: async (_uri, r) => {
+        const id = `${r.originX},${r.originY},${r.width}x${r.height}`;
+        crops.push(id);
+        return id;
+      },
+    };
+    const withColumns: DocumentTemplate = {
+      ...template,
+      regions: [
+        {
+          ...template.regions[0],
+          columns: [
+            { x: 0, w: 0.3, label: 'names' },
+            { x: 0.7, w: 0.3, label: 'totals' },
+          ],
+        },
+      ],
+    };
+    const backend = fakeBackend(['{"n": 1}', '{"n": 2}']);
+    const run = await runTemplate(backend, recording, 'page.jpg', withColumns);
+    expect(backend.calls[0].imageUris).toEqual(['0,0,300x500', '700,0,300x500']);
+    expect(backend.calls[1].imageUris).toEqual(['0,500,300x500', '700,500,300x500']);
+    expect(backend.calls[0].prompt).toContain('image 1 is the names; image 2 is the totals');
+    expect(run.results[1].imageUris).toHaveLength(2);
+    expect(crops).toHaveLength(4);
+  });
+
   it('gives a cut-off answer a bigger budget instead of a warmer retry', async () => {
     const backend = fakeBackend([{ text: '{"n": 1', cut: true }, '{"n": 1}', '{"n": 2}']);
     const run = await runTemplate(backend, fakeImages, 'page.jpg', template);

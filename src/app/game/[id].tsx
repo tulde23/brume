@@ -30,13 +30,14 @@ import { deleteGameImages, shareText } from '@/lib/files';
 import { Button, Card, T } from '@/ui/components';
 import { base, fonts, radius, space, useColors, type Colors } from '@/ui/theme';
 
+// Points and fouls first: they fit on a phone screen without scrolling.
 const STAT_COLUMNS: { key: keyof PlayerLine; label: string; width: number }[] = [
+  { key: 'points', label: 'PTS', width: 52 },
   { key: 'fouls', label: 'F', width: 40 },
   { key: 'fg2', label: '2P', width: 44 },
   { key: 'fg3', label: '3P', width: 44 },
   { key: 'ftMade', label: 'FTM', width: 48 },
   { key: 'ftAttempted', label: 'FTA', width: 48 },
-  { key: 'points', label: 'PTS', width: 52 },
 ];
 
 const blankPlayer = (): PlayerLine => ({
@@ -274,7 +275,8 @@ function TeamEditor({
         </Pressable>
       </View>
 
-      <ScrollView horizontal>
+      {/* nestedScrollEnabled: on Android a horizontal list inside the vertical page needs it to receive swipes. */}
+      <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
         <View>
           <View style={styles.tableRow}>
             <T muted style={[styles.head, { width: 44 }]}>#</T>

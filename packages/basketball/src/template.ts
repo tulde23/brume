@@ -66,7 +66,7 @@ const playersSchema: FieldSchema = {
 export const SCOREBOOK_PAGE_TEMPLATE: DocumentTemplate = {
   id: 'basketball.scorebook-page',
   name: 'Basketball scorebook (one team page)',
-  version: 2,
+  version: 4,
   systemPrompt:
     'You transcribe handwritten basketball scorebook pages exactly as written. ' +
     'You never invent players or numbers. If a value is blank or you cannot read it, use null.',
@@ -90,7 +90,10 @@ export const SCOREBOOK_PAGE_TEMPLATE: DocumentTemplate = {
       label: 'Player rows',
       // Header and period-score boxes usually sit near the top; most of a page is the player table.
       rect: { x: 0, y: 0.1, w: 1, h: 0.82 },
-      // Five strips at up to 2048px wide keeps pencil marks large enough for a 2B model to see.
+      // Five full-width strips at up to 2048px keep each row tall enough to read.
+      // (Tried in v3: sending only the name and totals columns as separate images. A 2B model
+      // could not keep rows aligned across images, so TP accuracy fell from 6/11 to 1/11 on the
+      // Stars sheet. The engine still supports `columns` for larger models.)
       tiles: { rows: 5, overlap: 0.15 },
       maxImageSide: 2048,
       maxTokens: 600,
@@ -100,6 +103,7 @@ export const SCOREBOOK_PAGE_TEMPLATE: DocumentTemplate = {
         'For each row with a player written in, give the number, the name, the TOTAL POINTS column ' +
         '(TP or PTS), and the number of fouls marked (crossed-out P1, P2... boxes, ticks, or numbers). ' +
         'Fill p2, p3, ftm and fta only from totals columns that are actually filled in; otherwise null. ' +
+        'Use null for any blank cell; do not write 0 unless a 0 is written. ' +
         'Skip rows with no player, and anything that is not the player table (like a running-score grid).',
       schema: playersSchema,
     },

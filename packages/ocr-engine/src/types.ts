@@ -50,6 +50,19 @@ export interface TileSpec {
   overlap: number;
 }
 
+/**
+ * A vertical slice of a region, in page coordinates (0..1). Wide tables often
+ * have the useful columns far apart (names at the left, totals at the right);
+ * sending just those slices, as separate images of the same rows, removes the
+ * clutter in between and keeps each slice at full resolution.
+ */
+export interface ColumnSpec {
+  x: number;
+  w: number;
+  /** Told to the model, e.g. "jersey number and name columns". */
+  label: string;
+}
+
 /** One area of the page to read, and what to read out of it. */
 export interface RegionSpec {
   id: string;
@@ -59,6 +72,8 @@ export interface RegionSpec {
   schema: FieldSchema;
   /** Split tall, dense regions (tables) into strips; small models read small crops far better. */
   tiles?: TileSpec;
+  /** Send only these column slices of each strip, as one image per slice, instead of the full width. */
+  columns?: ColumnSpec[];
   /** Longest side, in pixels, of each crop sent to the model. */
   maxImageSide?: number;
   maxTokens?: number;
@@ -79,8 +94,10 @@ export interface RegionResult {
   tileCount: number;
   /** Where on the page this crop came from (normalized). */
   rect: NormRect;
-  /** The crop that was sent to the model; useful for side-by-side review. */
+  /** The (first) crop that was sent to the model; useful for side-by-side review. */
   imageUri: string;
+  /** Every crop sent for this tile: one per column slice, or just imageUri. */
+  imageUris: string[];
   /** Parsed and coerced output, or null if the model never produced valid JSON. */
   data: unknown;
   raw: string;
@@ -127,7 +144,8 @@ export interface VisionBackend {
 }
 
 export interface GenerateRequest {
-  imageUri: string;
+  /** One or more images, in the order the prompt describes them. */
+  imageUris: string[];
   system?: string;
   prompt: string;
   /** Plain JSON Schema (already converted from FieldSchema). */
