@@ -1,6 +1,7 @@
 import type { ExtractionProgress } from '@brume/ocr-engine';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, View } from 'react-native';
@@ -26,6 +27,8 @@ const REGION_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 type Status = { text: string; detail: string; fraction: number; startedAt: number } | null;
+
+const KEEP_AWAKE_TAG = 'brume-reading';
 
 /** Within one crop: encoding the image is roughly the first 40%, writing the answer the rest. */
 function cropFraction(p: ExtractionProgress): number {
@@ -92,6 +95,9 @@ export default function Scan() {
     // If Android kills Brume for memory mid-read, nothing in JS runs; this marker lets
     // the next launch explain what happened instead of silently landing on Home.
     await setSetting(db, READ_IN_PROGRESS_KEY, String(Date.now()));
+    // A read takes minutes. If the screen locks, Android demotes Brume to a cached
+    // process, the first thing it kills to free memory; keep the screen on until done.
+    await activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => undefined);
     try {
       const modelId = await getActiveModelId(db);
       const sides = (['home', 'away'] as const).filter((s) => pages[s]);
@@ -153,6 +159,7 @@ export default function Scan() {
     } catch (e) {
       if (!signal.aborted) Alert.alert('Reading failed', e instanceof Error ? e.message : String(e));
     } finally {
+      await deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => undefined);
       await clearSetting(db, READ_IN_PROGRESS_KEY);
       setStatus(null);
       abort.current = null;

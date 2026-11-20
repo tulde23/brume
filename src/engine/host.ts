@@ -13,6 +13,7 @@ import {
   modelStatus,
 } from '@brume/ocr-engine/native';
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { Platform } from 'react-native';
 
 import { getSetting, setSetting } from '@/db';
 
@@ -43,7 +44,10 @@ async function backendFor(modelId: string, onLoad?: (fraction: number) => void):
   await unloadModel();
   const spec = getModel(modelId);
   if (modelStatus(spec) !== 'ready') throw new Error(`${spec.name} is not downloaded yet`);
-  loading = LlamaVisionBackend.load(spec, modelPaths(spec), onLoad);
+  // llama.rn picks 4 threads on 8-core Android phones; 6 keeps the big and mid cores busy
+  // without contending with the UI thread. Elsewhere its default is already sensible.
+  const threads = Platform.OS === 'android' ? 6 : undefined;
+  loading = LlamaVisionBackend.load(spec, modelPaths(spec), onLoad, { threads });
   try {
     loaded = await loading;
     return loaded;

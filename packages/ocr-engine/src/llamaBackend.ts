@@ -15,12 +15,14 @@ export class LlamaVisionBackend implements VisionBackend {
     spec: ModelSpec,
     paths: { model: string; mmproj: string },
     onProgress?: (fraction: number) => void,
+    options: { threads?: number } = {},
   ): Promise<LlamaVisionBackend> {
     const ctx = await initLlama(
       {
         model: paths.model,
         n_ctx: spec.contextSize,
         n_gpu_layers: 99,
+        ...(options.threads ? { n_threads: options.threads } : {}),
         // Context shifting corrupts image tokens; llama.rn requires it off for multimodal.
         ctx_shift: false,
         // Map weights from the file instead of copying them, so Android can page them
@@ -42,6 +44,12 @@ export class LlamaVisionBackend implements VisionBackend {
       await ctx.release();
       throw new Error('This model could not load its vision projector');
     }
+    // One line in the device log saying where inference runs; invaluable when a phone is slow.
+    console.log(
+      `[ocr-engine] ${spec.id} loaded: gpu=${ctx.gpu}` +
+        (ctx.gpu ? '' : ` (${ctx.reasonNoGPU || 'no reason given'})`) +
+        ` devices=${JSON.stringify(ctx.devices ?? [])} threads=${options.threads ?? 'default'}`,
+    );
     return new LlamaVisionBackend(ctx, spec.id, Boolean(ctx.gpu));
   }
 

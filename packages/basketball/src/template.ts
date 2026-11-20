@@ -45,7 +45,9 @@ const playersSchema: FieldSchema = {
   properties: {
     players: {
       type: 'array',
-      maxItems: 10,
+      // A strip covers ~1/5 of the page: up to ~8 rows on a dense book. The cap stops a runaway
+      // list (e.g. numbers from a running-score grid) before it burns the output budget.
+      maxItems: 8,
       items: {
         type: 'object',
         properties: {
