@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import type { Game, ScorebookLayout } from '@brume/basketball';
+import { fromLegacyLayout, type Game, type LegacyScorebookLayout, type ScorebookTemplate } from '@brume/basketball';
 
 export const DB_NAME = 'brume.db';
 
@@ -117,24 +117,66 @@ export async function setSetting(db: SQLiteDatabase, key: string, value: string)
   );
 }
 
-const LAYOUT_KEY = 'layout.basketball.scorebook';
+/** The single layout saved before templates; migrated into a template on first read. */
+const LEGACY_LAYOUT_KEY = 'layout.basketball.scorebook';
+const TEMPLATES_KEY = 'templates.basketball';
+const ACTIVE_TEMPLATE_KEY = 'templates.basketball.active';
 
-/** The user's marked scorebook layout, if they have set one up. */
-export async function getScorebookLayout(db: SQLiteDatabase): Promise<ScorebookLayout | null> {
-  const raw = await getSetting(db, LAYOUT_KEY);
-  if (!raw) return null;
+async function readTemplates(db: SQLiteDatabase): Promise<ScorebookTemplate[]> {
+  const raw = await getSetting(db, TEMPLATES_KEY);
+  let list: ScorebookTemplate[] = [];
   try {
-    const parsed = JSON.parse(raw) as ScorebookLayout;
-    return parsed.version === 1 ? parsed : null;
+    list = raw ? (JSON.parse(raw) as ScorebookTemplate[]).filter((t) => t.version === 2) : [];
   } catch {
-    return null;
+    list = [];
   }
+  const legacy = await getSetting(db, LEGACY_LAYOUT_KEY);
+  if (legacy) {
+    try {
+      const l = JSON.parse(legacy) as LegacyScorebookLayout;
+      if (l.version === 1) {
+        const t = fromLegacyLayout(l, `tpl-${Date.now().toString(36)}`);
+        list = [...list, t];
+        await setSetting(db, TEMPLATES_KEY, JSON.stringify(list));
+        if (!(await getSetting(db, ACTIVE_TEMPLATE_KEY))) await setSetting(db, ACTIVE_TEMPLATE_KEY, t.id);
+      }
+    } catch {
+      // Unreadable old layout: nothing worth keeping.
+    }
+    await clearSetting(db, LEGACY_LAYOUT_KEY);
+  }
+  return list;
 }
 
-export async function saveScorebookLayout(db: SQLiteDatabase, layout: ScorebookLayout): Promise<void> {
-  await setSetting(db, LAYOUT_KEY, JSON.stringify(layout));
+/** Saved scorebook templates, most recently changed first. */
+export async function listTemplates(db: SQLiteDatabase): Promise<ScorebookTemplate[]> {
+  return (await readTemplates(db)).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export async function clearScorebookLayout(db: SQLiteDatabase): Promise<void> {
-  await clearSetting(db, LAYOUT_KEY);
+export async function getTemplate(db: SQLiteDatabase, id: string): Promise<ScorebookTemplate | null> {
+  return (await readTemplates(db)).find((t) => t.id === id) ?? null;
+}
+
+export async function saveTemplate(db: SQLiteDatabase, template: ScorebookTemplate): Promise<void> {
+  const list = await readTemplates(db);
+  const next = [...list.filter((t) => t.id !== template.id), template];
+  await setSetting(db, TEMPLATES_KEY, JSON.stringify(next));
+}
+
+export async function deleteTemplate(db: SQLiteDatabase, id: string): Promise<void> {
+  const list = await readTemplates(db);
+  await setSetting(db, TEMPLATES_KEY, JSON.stringify(list.filter((t) => t.id !== id)));
+  if ((await getSetting(db, ACTIVE_TEMPLATE_KEY)) === id) await clearSetting(db, ACTIVE_TEMPLATE_KEY);
+}
+
+/** The template scans use; null means read the page without one. */
+export async function getActiveTemplate(db: SQLiteDatabase): Promise<ScorebookTemplate | null> {
+  const list = await readTemplates(db);
+  const id = await getSetting(db, ACTIVE_TEMPLATE_KEY);
+  return list.find((t) => t.id === id) ?? null;
+}
+
+export async function setActiveTemplate(db: SQLiteDatabase, id: string | null): Promise<void> {
+  if (id) await setSetting(db, ACTIVE_TEMPLATE_KEY, id);
+  else await clearSetting(db, ACTIVE_TEMPLATE_KEY);
 }

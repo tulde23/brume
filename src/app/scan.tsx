@@ -6,17 +6,19 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, View } from 'react-native';
 
-import { READ_IN_PROGRESS_KEY, clearSetting, getScorebookLayout, saveGame, setSetting } from '@/db';
+import { READ_IN_PROGRESS_KEY, clearSetting, getActiveTemplate, saveGame, setSetting } from '@/db';
 import {
   SCOREBOOK_PAGE_TEMPLATE,
-  applyScorebookLayout,
+  applyTemplate,
+  isUsable,
+  markedParts,
   emptyTeam,
   normalizeDate,
   readPage,
   seasonFor,
   type Game,
   type PageReading,
-  type ScorebookLayout,
+  type ScorebookTemplate,
   type Side,
 } from '@brume/basketball';
 import { extract, getActiveModelId } from '@/engine/host';
@@ -24,9 +26,13 @@ import { keepImage, newId } from '@/lib/files';
 import { Button, Card, ProgressBar, T } from '@/ui/components';
 import { base, space, useColors } from '@/ui/theme';
 
-const REGION_LABELS: Record<string, string> = Object.fromEntries(
-  SCOREBOOK_PAGE_TEMPLATE.regions.map((r) => [r.id, r.label.toLowerCase()]),
-);
+const REGION_LABELS: Record<string, string> = {
+  ...Object.fromEntries(SCOREBOOK_PAGE_TEMPLATE.regions.map((r) => [r.id, r.label.toLowerCase()])),
+  details: 'game details',
+  timeouts: 'timeouts',
+  team_fouls: 'team fouls',
+  quarters: 'score by quarter',
+};
 
 type Status = { text: string; detail: string; fraction: number; startedAt: number } | null;
 
@@ -63,12 +69,12 @@ export default function Scan() {
   const db = useSQLiteContext();
   const c = useColors();
   const [pages, setPages] = useState<Record<Side, string | null>>({ home: null, away: null });
-  const [layout, setLayout] = useState<ScorebookLayout | null>(null);
+  const [layout, setLayout] = useState<ScorebookTemplate | null>(null);
 
-  // Re-read after returning from the layout screen.
+  // Re-read after returning from the template screens.
   useFocusEffect(
     useCallback(() => {
-      getScorebookLayout(db).then(setLayout);
+      getActiveTemplate(db).then((t) => setLayout(t && isUsable(t) ? t : null));
     }, [db]),
   );
   const [status, setStatus] = useState<Status>(null);
@@ -116,7 +122,7 @@ export default function Scan() {
 
       for (const [i, side] of sides.entries()) {
         const uri = keepImage(pages[side]!, id, side);
-        const template = layout ? applyScorebookLayout(SCOREBOOK_PAGE_TEMPLATE, layout) : SCOREBOOK_PAGE_TEMPLATE;
+        const template = layout ? applyTemplate(SCOREBOOK_PAGE_TEMPLATE, layout) : SCOREBOOK_PAGE_TEMPLATE;
         const run = await extract(modelId, uri, template, {
           signal,
           onModelLoad: (f) =>
@@ -134,6 +140,12 @@ export default function Scan() {
           },
         });
         console.log(`[scan] ${side} read in ${run.finishedAt - run.startedAt}ms with ${run.modelId}`);
+        // The model's exact answer per crop: when a field comes back blank, this shows
+        // whether the model left it out or wrote it in a shape the schema didn't accept.
+        for (const r of run.results) {
+          console.log(`[scan] raw ${side} ${r.regionId}#${r.tileIndex}: ${r.raw.replace(/\s+/g, ' ').slice(0, 1500)}`);
+          if (r.warnings.length) console.log(`[scan] warnings ${side} ${r.regionId}#${r.tileIndex}: ${r.warnings.join('; ')}`);
+        }
         const reading = readPage(run);
         reading.team.crops = reading.team.crops.map((cr, k) => ({
           ...cr,
@@ -220,21 +232,22 @@ export default function Scan() {
       {(pages.home || pages.away) && (
         <Card>
           <View style={[base.row, { justifyContent: 'space-between' }]}>
-            <T style={base.h2}>Scorebook layout</T>
-            <T muted>{layout ? 'Saved' : 'Not set'}</T>
+            <T style={base.h2}>Template</T>
+            <T muted>{layout ? layout.name : 'None'}</T>
           </View>
           <T muted>
             {layout
-              ? 'Brume reads the player rows from the box you marked. Edit it if you switch scorebooks.'
-              : 'Mark where the player rows, names and points are, once for your scorebook. Reading is much more accurate afterwards.'}
+              ? `Brume reads the ${markedParts(layout).length} parts you marked on this kind of scorebook.`
+              : 'Show Brume where each part of your scorebook is, once per kind of book. Reading is much more accurate afterwards.'}
           </T>
-          <Button
-            title={layout ? 'Edit layout' : 'Set up layout'}
-            kind={layout ? 'secondary' : 'primary'}
-            onPress={() =>
-              router.push({ pathname: '/scorebook-layout', params: { uri: (pages.home ?? pages.away)! } })
-            }
-          />
+          {layout ? (
+            <Button title="Change template" kind="secondary" onPress={() => router.push('/templates')} />
+          ) : (
+            <Button
+              title="Make a template from this photo"
+              onPress={() => router.push({ pathname: '/template-editor', params: { uri: (pages.home ?? pages.away)! } })}
+            />
+          )}
         </Card>
       )}
       <Button title="Read pages" onPress={read} disabled={!pages.home && !pages.away} />

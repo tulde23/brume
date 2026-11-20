@@ -1,14 +1,15 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { READ_IN_PROGRESS_KEY, clearSetting, getSetting, listGames } from '@/db';
+import { READ_IN_PROGRESS_KEY, clearSetting, deleteGame, getSetting, listGames } from '@/db';
 import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@brume/basketball';
 import { activeModel, type ActiveModel } from '@/engine/host';
 import { Badge, Button, Card, StatusDot, T } from '@/ui/components';
+import { deleteGameImages } from '@/lib/files';
 import { Logo } from '@/ui/Logo';
 import { base, fonts, space, useColors } from '@/ui/theme';
 
@@ -36,6 +37,24 @@ export default function Home() {
       };
     }, [db]),
   );
+
+  const remove = (game: Game) =>
+    Alert.alert(
+      'Delete this game?',
+      `${game.home.name ?? 'Home'} vs ${game.away.name ?? 'Away'}${game.date ? `, ${game.date}` : ''}. The box score and page photos will be removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteGame(db, game.id);
+            deleteGameImages(game.id);
+            setGames((list) => list.filter((g) => g.id !== game.id));
+          },
+        },
+      ],
+    );
 
   const season = seasonFor(null);
   const top = useMemo(() => seasonTotals(games.filter((g) => g.season === season))[0], [games, season]);
@@ -153,23 +172,31 @@ export default function Home() {
                 <T style={{ color: c.accent, fontFamily: fonts.bodySemiBold }}>Season</T>
               </Pressable>
             </View>
-            {games.length === 0 && <T muted>No games yet. Scan a scorebook page to get started.</T>}
+            {games.length === 0 ? (
+              <T muted>No games yet. Scan a scorebook page to get started.</T>
+            ) : (
+              <T muted style={base.small}>Press and hold a game to delete it.</T>
+            )}
           </View>
         }
-        renderItem={({ item }) => <GameRow game={item} />}
+        renderItem={({ item }) => <GameRow game={item} onDelete={() => remove(item)} />}
         ItemSeparatorComponent={() => <View style={{ height: space.sm + 2 }} />}
       />
     </SafeAreaView>
   );
 }
 
-function GameRow({ game }: { game: Game }) {
+function GameRow({ game, onDelete }: { game: Game; onDelete: () => void }) {
   const issues = validateGame(game);
   const errors = issues.filter((i) => i.severity === 'error').length;
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/game/[id]', params: { id: game.id } })}
-      accessibilityRole="button">
+      onLongPress={onDelete}
+      accessibilityRole="button"
+      accessibilityHint="Press and hold to delete"
+      accessibilityActions={[{ name: 'delete', label: 'Delete game' }]}
+      onAccessibilityAction={(e) => e.nativeEvent.actionName === 'delete' && onDelete()}>
       <Card style={styles.gameRow}>
         <View style={{ flex: 1, gap: 4 }}>
           <T style={{ fontFamily: fonts.bodySemiBold, fontSize: 16 }}>

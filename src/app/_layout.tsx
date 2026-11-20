@@ -54,7 +54,8 @@ export default function RootLayout() {
         <Stack.Screen name="models" options={{ title: 'Reading model' }} />
         <Stack.Screen name="season" options={{ title: 'Season' }} />
         <Stack.Screen name="sync" options={{ title: 'Sync' }} />
-        <Stack.Screen name="scorebook-layout" options={{ title: 'Scorebook layout' }} />
+        <Stack.Screen name="templates" options={{ title: 'Scorebook templates' }} />
+        <Stack.Screen name="template-editor" options={{ title: 'Template' }} />
         <Stack.Screen name="game/[id]" options={{ title: 'Box score' }} />
       </Stack>
     </SQLiteProvider>

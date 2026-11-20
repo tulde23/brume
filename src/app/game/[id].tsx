@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,6 +27,7 @@ import {
 } from '@brume/basketball';
 import { deleteGameImages, shareText } from '@/lib/files';
 import { Button, Card, T } from '@/ui/components';
+import { PhotoViewer, type Photo } from '@/ui/PhotoViewer';
 import { base, fonts, radius, space, useColors, type Colors } from '@/ui/theme';
 
 // Points and fouls first: they fit on a phone screen without scrolling.
@@ -52,6 +52,24 @@ const blankPlayer = (): PlayerLine => ({
   readNotes: [],
 });
 
+/** What Brume read from, in order: the whole page, then each crop it sent to the model. */
+function teamPhotos(team: TeamSheet): Photo[] {
+  const label = (regionId: string) => {
+    if (regionId === 'summary') return 'Header and score by period';
+    if (regionId === 'team_name') return 'Team name';
+    if (regionId === 'details') return 'Game details';
+    if (regionId === 'quarters') return 'Score by quarter';
+    if (regionId === 'timeouts') return 'Timeouts';
+    if (regionId === 'team_fouls') return 'Team fouls';
+    const strip = regionId.match(/^players-(\d+)/);
+    return strip ? `Player rows, strip ${strip[1]}` : regionId;
+  };
+  return [
+    ...(team.pageUri ? [{ uri: team.pageUri, label: 'Full page' }] : []),
+    ...team.crops.map((cr) => ({ uri: cr.uri, label: label(cr.regionId) })),
+  ];
+}
+
 const toInt = (s: string): number | null => {
   const n = parseInt(s.replace(/[^0-9]/g, ''), 10);
   return Number.isFinite(n) ? n : null;
@@ -62,7 +80,7 @@ export default function GameScreen() {
   const db = useSQLiteContext();
   const c = useColors();
   const [game, setGame] = useState<Game | null>(null);
-  const [zoom, setZoom] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<number | null>(null);
   const [side, setSide] = useState<Side>('home');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -188,7 +206,7 @@ export default function GameScreen() {
           team={game[side]}
           issueAt={issueAt}
           onChange={(fn) => updateTeam(side, fn)}
-          onZoom={setZoom}
+          onZoom={setViewing}
         />
 
         <Card>
@@ -213,11 +231,7 @@ export default function GameScreen() {
         <Button title="Delete game" kind="danger" onPress={remove} />
       </ScrollView>
 
-      <Modal visible={zoom !== null} animationType="fade" onRequestClose={() => setZoom(null)}>
-        <Pressable style={styles.zoom} onPress={() => setZoom(null)} accessibilityLabel="Close photo">
-          {zoom && <Image source={{ uri: zoom }} style={styles.zoomImage} resizeMode="contain" />}
-        </Pressable>
-      </Modal>
+      <PhotoViewer photos={teamPhotos(game[side])} index={viewing} onClose={() => setViewing(null)} />
     </>
   );
 }
@@ -233,7 +247,8 @@ function TeamEditor({
   team: TeamSheet;
   issueAt: Map<string, Issue>;
   onChange: (fn: (t: TeamSheet) => TeamSheet) => void;
-  onZoom: (uri: string) => void;
+  /** Open the photo viewer at this index of teamPhotos(team). */
+  onZoom: (index: number) => void;
 }) {
   const c = useColors();
   const flag = (path: string) => issueAt.get(`${side}.${path}`);
@@ -242,19 +257,22 @@ function TeamEditor({
 
   return (
     <Card>
-      <Field label={side === 'home' ? 'Home team' : 'Away team'} value={team.name} c={c}
-        onChange={(v) => onChange((t) => ({ ...t, name: v || null }))} />
+      <View style={base.row}>
+        <View style={{ flex: 1 }}>
+          <Field label={side === 'home' ? 'Home team' : 'Away team'} value={team.name} c={c}
+            onChange={(v) => onChange((t) => ({ ...t, name: v || null }))} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Field label="Coach" value={team.coach ?? null} c={c}
+            onChange={(v) => onChange((t) => ({ ...t, coach: v || null }))} />
+        </View>
+      </View>
 
       {team.crops.length > 0 && (
         <ScrollView horizontal contentContainerStyle={{ gap: space.sm }}>
-          {team.pageUri && (
-            <Pressable onPress={() => onZoom(team.pageUri!)} accessibilityLabel="View full page">
-              <Image source={{ uri: team.pageUri }} style={styles.thumb} />
-            </Pressable>
-          )}
-          {team.crops.map((cr) => (
-            <Pressable key={cr.uri} onPress={() => onZoom(cr.uri)} accessibilityLabel={`View ${cr.regionId}`}>
-              <Image source={{ uri: cr.uri }} style={styles.thumb} />
+          {teamPhotos(team).map((p, i) => (
+            <Pressable key={p.uri} onPress={() => onZoom(i)} accessibilityLabel={`View ${p.label}`}>
+              <Image source={{ uri: p.uri }} style={styles.thumb} />
             </Pressable>
           ))}
         </ScrollView>
@@ -273,6 +291,18 @@ function TeamEditor({
           accessibilityRole="button" style={styles.addOt}>
           <T style={{ color: c.accent }}>+ OT</T>
         </Pressable>
+      </View>
+
+      <View style={[base.row, { flexWrap: 'wrap', alignItems: 'flex-end' }]}>
+        <Cell label="Timeouts" value={team.timeoutsUsed} width={72} c={c}
+          onChange={(v) => onChange((t) => ({ ...t, timeoutsUsed: v }))} />
+        {(team.teamFouls?.length ? team.teamFouls : [null, null]).map((f, i, all) => (
+          <Cell key={i} label={all.length === 2 ? `Team fouls H${i + 1}` : `Team fouls ${i + 1}`} value={f} width={all.length === 2 ? 100 : 72} c={c}
+            onChange={(v) => onChange((t) => {
+              const cur = t.teamFouls?.length ? t.teamFouls : [null, null];
+              return { ...t, teamFouls: cur.map((x, k) => (k === i ? v : x)) };
+            })} />
+        ))}
       </View>
 
       {/* nestedScrollEnabled: on Android a horizontal list inside the vertical page needs it to receive swipes. */}
@@ -407,6 +437,4 @@ const styles = StyleSheet.create({
   remove: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   addOt: { paddingHorizontal: space.sm, paddingTop: 18 },
   thumb: { width: 96, height: 72, borderRadius: 6 },
-  zoom: { flex: 1, backgroundColor: '#000', justifyContent: 'center' },
-  zoomImage: { width: '100%', height: '100%' },
 });
