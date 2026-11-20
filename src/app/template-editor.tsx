@@ -33,7 +33,6 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Image,
   Platform,
   Pressable,
@@ -54,6 +53,7 @@ import { Button, Card, ProgressBar, T } from '@/ui/components';
 import { PageMarker, PhotoCrop, type MarkerShape } from '@/ui/PageMarker';
 import { PART_COLORS } from '@/ui/partColors';
 import { ReadingView, progressRect } from '@/ui/ReadingView';
+import { useDialog } from '@/ui/Dialog';
 import { base, fonts, space, useColors, type Colors } from '@/ui/theme';
 
 type Phase = 'photo' | 'pick' | 'mark' | 'review' | 'test';
@@ -102,7 +102,7 @@ function fullRect(t: ScorebookTemplate, id: PartId): NormRect | null {
   return { x: v.x, w: v.w, y: rows.y, h: rows.h };
 }
 
-const STATUS_LABEL: Record<PartStatus, string> = { strong: 'Strong', ok: 'OK', weak: 'Weak', planned: 'Coming soon' };
+const STATUS_LABEL: Record<PartStatus, string> = { strong: 'Strong', ok: 'OK', weak: 'Weak', untested: 'New', planned: 'Coming soon' };
 
 function StatusChip({ status, c }: { status: PartStatus; c: Colors }) {
   const [bg, fg] =
@@ -535,6 +535,7 @@ function PhotoPhase({
   onPhoto: (uri: string) => void;
   onNext: () => void;
 }) {
+  const dialog = useDialog();
   const pick = async (source: 'camera' | 'library') => {
     const options: ImagePicker.ImagePickerOptions = {
       mediaTypes: ['images'],
@@ -542,7 +543,7 @@ function PhotoPhase({
       allowsEditing: Platform.OS === 'android',
     };
     if (source === 'camera' && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
-      Alert.alert('Camera access needed', 'Allow camera access in Settings, or choose a photo instead.');
+      void dialog.notice('Camera access needed', 'Allow camera access in Settings, or choose a photo instead.');
       return;
     }
     const r = source === 'camera' ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);

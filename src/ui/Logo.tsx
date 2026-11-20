@@ -26,7 +26,10 @@ export function Logo({ size = 28 }: { size?: number }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: size * 0.3 }} accessibilityRole="header" accessibilityLabel="InkStat">
       <LogoMark size={size} />
-      <Text style={{ fontFamily: fonts.heading, fontSize: size * 0.86, color: c.text, letterSpacing: -0.3 }}>InkStat</Text>
+      {/* Two-tone wordmark: "Ink" in the text color, "Stat" in the mark's line color. */}
+      <Text style={{ fontFamily: fonts.heading, fontSize: size * 0.86, color: c.text, letterSpacing: -0.3 }}>
+        Ink<Text style={{ color: c.markLine }}>Stat</Text>
+      </Text>
     </View>
   );
 }

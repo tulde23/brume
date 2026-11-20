@@ -4,7 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Image, Platform, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { READ_IN_PROGRESS_KEY, clearSetting, getActiveTemplate, listTemplates, saveGame, setSetting } from '@/db';
 import {
@@ -27,7 +27,8 @@ import { keepImage, newId } from '@/lib/files';
 import { recognizePageText } from '../../modules/page-text';
 import { Button, Card, ProgressBar, T } from '@/ui/components';
 import { ReadingView, progressRect } from '@/ui/ReadingView';
-import { base, space, useColors } from '@/ui/theme';
+import { useDialog } from '@/ui/Dialog';
+import { base, fonts, space, useColors } from '@/ui/theme';
 
 const REGION_LABELS: Record<string, string> = {
   ...Object.fromEntries(SCOREBOOK_PAGE_TEMPLATE.regions.map((r) => [r.id, r.label.toLowerCase()])),
@@ -72,7 +73,14 @@ function useElapsed(since: number | null): string {
 export default function Scan() {
   const db = useSQLiteContext();
   const c = useColors();
+  const dialog = useDialog();
   const [pages, setPages] = useState<Record<Side, string | null>>({ home: null, away: null });
+  // A guided flow: home page first, then the away page (or skip it), then read.
+  const [tab, setTab] = useState<Side>('home');
+  const [skipped, setSkipped] = useState<Record<Side, boolean>>({ home: false, away: false });
+  const done = (side: Side) => !!pages[side] || skipped[side];
+  const ready = done('home') && done('away') && (!!pages.home || !!pages.away);
+  const pageCount = (pages.home ? 1 : 0) + (pages.away ? 1 : 0);
   const [layout, setLayout] = useState<ScorebookTemplate | null>(null);
   const [templateCount, setTemplateCount] = useState(0);
 
@@ -100,7 +108,7 @@ export default function Scan() {
     if (source === 'camera') {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('Camera access needed', 'Allow camera access in Settings, or choose a photo instead.');
+        void dialog.notice('Camera access needed', 'Allow camera access in Settings, or choose a photo instead.');
         return;
       }
     }
@@ -108,7 +116,10 @@ export default function Scan() {
       source === 'camera'
         ? await ImagePicker.launchCameraAsync(options)
         : await ImagePicker.launchImageLibraryAsync(options);
-    if (!result.canceled) setPages((p) => ({ ...p, [side]: result.assets[0].uri }));
+    if (!result.canceled) {
+      setPages((p) => ({ ...p, [side]: result.assets[0].uri }));
+      setSkipped((k) => ({ ...k, [side]: false }));
+    }
   };
 
   const read = async () => {
@@ -191,16 +202,16 @@ export default function Scan() {
       const failures = sides.flatMap((s) => readings[s]!.failures.map((f) => `${s}: ${f}`));
       const notes = sides.flatMap((s) => readings[s]!.notes.map((n) => `${s}: ${n}`));
       if (failures.length) {
-        Alert.alert(
+        void dialog.notice(
           'Some parts could not be read',
           `${failures.join('\n')}\n\nYou can fill these in by hand on the next screen.`,
         );
       } else if (notes.length) {
-        Alert.alert('Adjusted while reading', notes.join('\n'));
+        void dialog.notice('Adjusted while reading', notes.join('\n'));
       }
       router.replace({ pathname: '/game/[id]', params: { id } });
     } catch (e) {
-      if (!signal.aborted) Alert.alert('Reading failed', e instanceof Error ? e.message : String(e));
+      if (!signal.aborted) void dialog.notice('Reading failed', e instanceof Error ? e.message : String(e));
     } finally {
       await deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => undefined);
       await clearSetting(db, READ_IN_PROGRESS_KEY);
@@ -227,23 +238,66 @@ export default function Scan() {
 
   return (
     <ScrollView style={[base.screen, { backgroundColor: c.bg }]} contentContainerStyle={base.content}>
-      <T muted>
-        {"Photograph each team's page flat, in good light, filling the frame. You can scan just one team."}
-      </T>
-      {(['home', 'away'] as const).map((side) => (
-        <Card key={side}>
-          <T style={base.h2}>{side === 'home' ? 'Home team page' : 'Away team page'}</T>
-          {pages[side] && <Image source={{ uri: pages[side]! }} style={styles.preview} resizeMode="contain" />}
-          <View style={base.row}>
-            <View style={{ flex: 1 }}>
-              <Button title={pages[side] ? 'Retake' : 'Camera'} onPress={() => pick(side, 'camera')} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Button title="Photos" kind="secondary" onPress={() => pick(side, 'library')} />
-            </View>
+      {/* Home | Away: each tab shows a check once its page is in. */}
+      <View accessibilityRole="tablist" style={[styles.tabs, { backgroundColor: c.sunken }]}>
+        {(['home', 'away'] as const).map((side) => {
+          const selected = tab === side;
+          return (
+            <Pressable
+              key={side}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              accessibilityLabel={`${side === 'home' ? 'Home' : 'Away'} team page${pages[side] ? ', photographed' : skipped[side] ? ', skipped' : ''}`}
+              onPress={() => setTab(side)}
+              style={[styles.tab, selected && { backgroundColor: c.card, borderColor: c.border }]}>
+              <T style={{ fontFamily: fonts.bodySemiBold, color: selected ? c.text : c.muted }}>
+                {`${side === 'home' ? '1 · Home team' : '2 · Away team'}`}
+              </T>
+              {pages[side] ? (
+                <T style={{ color: c.ok, fontFamily: fonts.bodyBold }}>✓</T>
+              ) : skipped[side] ? (
+                <T muted style={base.small}>skipped</T>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Card>
+        <T style={base.h2}>{tab === 'home' ? 'Home team page' : 'Away team page'}</T>
+        <T muted>
+          {pages[tab]
+            ? 'Check the whole page is in the photo and sharp. Retake it if not.'
+            : 'Lay the page flat in good light and fill the frame with it.'}
+        </T>
+        {pages[tab] && <Image source={{ uri: pages[tab]! }} style={styles.preview} resizeMode="contain" />}
+        <View style={base.row}>
+          <View style={{ flex: 1 }}>
+            <Button title={pages[tab] ? 'Retake' : 'Camera'} kind={pages[tab] ? 'secondary' : 'primary'} onPress={() => pick(tab, 'camera')} />
           </View>
-        </Card>
-      ))}
+          <View style={{ flex: 1 }}>
+            <Button title="Photos" kind="secondary" onPress={() => pick(tab, 'library')} />
+          </View>
+        </View>
+        {/* The next step, so nobody stops after the home page. */}
+        {tab === 'home' && pages.home && !done('away') && (
+          <Button title="Next: away team →" onPress={() => setTab('away')} />
+        )}
+        {!pages[tab] && !skipped[tab] && (
+          <Pressable
+            onPress={() => {
+              setSkipped((k) => ({ ...k, [tab]: true }));
+              if (tab === 'home') setTab('away');
+            }}
+            accessibilityRole="button"
+            style={{ minHeight: 44, justifyContent: 'center', alignItems: 'center' }}>
+            <T style={{ color: c.accent, fontFamily: fonts.bodySemiBold }}>
+              {tab === 'home' ? 'Skip: scan the away team only' : 'Skip: scan one team only'}
+            </T>
+          </Pressable>
+        )}
+      </Card>
+
       {(pages.home || pages.away) && (
         <Card>
           <View style={[base.row, { justifyContent: 'space-between' }]}>
@@ -270,11 +324,24 @@ export default function Scan() {
           )}
         </Card>
       )}
-      <Button title="Read pages" onPress={read} disabled={!pages.home && !pages.away} />
+      {ready ? (
+        <View style={{ gap: space.xs }}>
+          <T muted style={[base.small, { textAlign: 'center' }]}>
+            {`Home ${pages.home ? '\u2713' : 'skipped'} \u00b7 Away ${pages.away ? '\u2713' : 'skipped'}`}
+          </T>
+          <Button title={pageCount === 2 ? 'Read both pages' : `Read the ${pages.home ? 'home' : 'away'} page`} onPress={read} />
+        </View>
+      ) : (
+        <T muted style={[base.small, { textAlign: 'center' }]}>
+          {!done('home') ? 'Start with the home team\u2019s page.' : 'Now the away team\u2019s page, or skip it.'}
+        </T>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   preview: { width: '100%', height: 220, borderRadius: 8, marginVertical: space.xs },
+  tabs: { flexDirection: 'row', borderRadius: 8, padding: 4, gap: 4 },
+  tab: { flex: 1, minHeight: 44, borderRadius: 6, borderWidth: 1, borderColor: 'transparent', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
 });

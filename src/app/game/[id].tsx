@@ -1,133 +1,38 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-  type KeyboardTypeOptions,
-} from 'react-native';
+import { useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
-import { deleteGame, getGame, saveGame } from '@/db';
-import {
-  gameToCsv,
-  gameToJson,
-  seasonFor,
-  teamScore,
-  validateGame,
-  type Game,
-  type Issue,
-  type PlayerLine,
-  type Side,
-  type TeamSheet,
-} from '@inkstat/basketball';
+import { clearTombstone, deleteGame, saveGame } from '@/db';
+import { gameToCsv, gameToJson, teamScore, validateGame, type Game, type Side } from '@inkstat/basketball';
 import { deleteGameImages, shareText } from '@/lib/files';
-import { Button, Card, T } from '@/ui/components';
-import { PhotoViewer, type Photo } from '@/ui/PhotoViewer';
-import { base, fonts, radius, space, useColors, type Colors } from '@/ui/theme';
+import { sideName, useGame } from '@/lib/useGame';
+import { T } from '@/ui/components';
+import { useDialog } from '@/ui/Dialog';
+import { EditSheet } from '@/ui/EditSheet';
+import { base, fonts, radius, space, useColors } from '@/ui/theme';
 
-// Points and fouls first: they fit on a phone screen without scrolling.
-const STAT_COLUMNS: { key: keyof PlayerLine; label: string; width: number }[] = [
-  { key: 'points', label: 'PTS', width: 52 },
-  { key: 'fouls', label: 'F', width: 40 },
-  { key: 'fg2', label: '2P', width: 44 },
-  { key: 'fg3', label: '3P', width: 44 },
-  { key: 'ftMade', label: 'FTM', width: 48 },
-  { key: 'ftAttempted', label: 'FTA', width: 48 },
-];
+const SIDES: Side[] = ['home', 'away'];
 
-const blankPlayer = (): PlayerLine => ({
-  number: null,
-  name: null,
-  fouls: null,
-  fg2: null,
-  fg3: null,
-  ftMade: null,
-  ftAttempted: null,
-  points: null,
-  readNotes: [],
-});
-
-/** What InkStat read from, in order: the whole page, then each crop it sent to the model. */
-function teamPhotos(team: TeamSheet): Photo[] {
-  const label = (regionId: string) => {
-    if (regionId === 'summary') return 'Header and score by period';
-    if (regionId === 'team_name') return 'Team name';
-    if (regionId === 'details') return 'Game details';
-    if (regionId === 'quarters') return 'Score by quarter';
-    if (regionId === 'timeouts') return 'Timeouts';
-    if (regionId === 'team_fouls') return 'Team fouls';
-    const strip = regionId.match(/^players-(\d+)/);
-    return strip ? `Player rows, strip ${strip[1]}` : regionId;
-  };
-  return [
-    ...(team.pageUri ? [{ uri: team.pageUri, label: 'Full page' }] : []),
-    ...team.crops.map((cr) => ({ uri: cr.uri, label: label(cr.regionId) })),
-  ];
+function formatDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-const toInt = (s: string): number | null => {
-  const n = parseInt(s.replace(/[^0-9]/g, ''), 10);
-  return Number.isFinite(n) ? n : null;
-};
-
-export default function GameScreen() {
+export default function GameSummary() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
   const c = useColors();
-  const [game, setGame] = useState<Game | null>(null);
-  const [viewing, setViewing] = useState<number | null>(null);
-  const [side, setSide] = useState<Side>('home');
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    getGame(db, id).then(setGame);
-  }, [db, id]);
-
-  // Save shortly after edits stop, and on leaving the screen.
-  const pending = useRef<Game | null>(null);
-  useEffect(
-    () => () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      if (pending.current) void saveGame(db, pending.current);
-    },
-    [db],
-  );
-
-  const update = useCallback(
-    (fn: (g: Game) => Game) => {
-      setGame((prev) => {
-        if (!prev) return prev;
-        const next = { ...fn(prev), updatedAt: Date.now() };
-        next.season = seasonFor(next.date);
-        pending.current = next;
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
-          pending.current = null;
-          void saveGame(db, next);
-        }, 600);
-        return next;
-      });
-    },
-    [db],
-  );
-
+  const dialog = useDialog();
+  const { game, update } = useGame(id);
+  const [editing, setEditing] = useState(false);
   const issues = useMemo(() => (game ? validateGame(game) : []), [game]);
-  const issueAt = useMemo(() => {
-    const map = new Map<string, Issue>();
-    for (const i of issues) if (!map.has(i.path) || i.severity === 'error') map.set(i.path, i);
-    return map;
-  }, [issues]);
 
   if (!game) return <View style={[base.screen, { backgroundColor: c.bg }]} />;
-  const sideIssues = issues.filter((i) => i.path.startsWith(`${side}.`));
-
-  const updateTeam = (side: Side, fn: (t: TeamSheet) => TeamSheet) =>
-    update((g) => ({ ...g, [side]: fn(g[side]) }));
 
   const share = async (kind: 'csv' | 'json') => {
     const name = `${game.date ?? 'game'}-${game.home.name ?? 'home'}-vs-${game.away.name ?? 'away'}`
@@ -137,304 +42,195 @@ export default function GameScreen() {
       if (kind === 'csv') await shareText(`${name}.csv`, gameToCsv(game), 'text/csv');
       else await shareText(`${name}.json`, gameToJson(game), 'application/json');
     } catch (e) {
-      Alert.alert('Could not share', e instanceof Error ? e.message : String(e));
+      void dialog.notice('Could not share', e instanceof Error ? e.message : String(e));
     }
   };
 
-  const remove = () =>
-    Alert.alert('Delete this game?', 'The box score and page photos will be removed.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          pending.current = null;
-          if (saveTimer.current) clearTimeout(saveTimer.current);
-          await deleteGame(db, game.id);
-          deleteGameImages(game.id);
-          router.back();
+  const remove = async () => {
+    const h = teamScore(game.home);
+    const a = teamScore(game.away);
+    const ok = await dialog.confirm({
+      title: 'Delete this game?',
+      subject: { label: `${sideName(game, 'home')} vs ${sideName(game, 'away')}`, value: h !== null && a !== null ? `${h}–${a}` : undefined },
+      body: 'The box score and both page photos go. Your templates stay.',
+      confirm: 'Delete game',
+      cancel: 'Keep it',
+      destructive: true,
+    });
+    if (!ok) return;
+    const copy: Game = game;
+    await deleteGame(db, copy.id);
+    let undone = false;
+    const purge = setTimeout(() => !undone && deleteGameImages(copy.id), 6000);
+    router.back();
+    dialog.toast({
+      text: 'Game deleted',
+      duration: 5500,
+      action: {
+        label: 'Undo',
+        onPress: () => {
+          undone = true;
+          clearTimeout(purge);
+          void clearTombstone(db, copy.id).then(() => saveGame(db, copy));
         },
       },
+    });
+  };
+
+  const more = () =>
+    dialog.actions('This game', [
+      { label: 'Edit date and place', onPress: () => setEditing(true) },
+      { label: 'Export CSV', hint: 'For a spreadsheet', onPress: () => void share('csv') },
+      { label: 'Export JSON', onPress: () => void share('json') },
+      { label: 'Delete game', destructive: true, onPress: () => void remove() },
     ]);
+
+  const periods = Math.max(4, game.home.periodScores.length, game.away.periodScores.length);
+  const winner: Side | null = (() => {
+    const h = teamScore(game.home);
+    const a = teamScore(game.away);
+    return h === null || a === null || h === a ? null : h > a ? 'home' : 'away';
+  })();
+  const when = [formatDate(game.date), game.location].filter(Boolean).join(' · ');
 
   return (
     <>
       <Stack.Screen
         options={{
-          title: `${game.home.name ?? 'Home'} ${teamScore(game.home) ?? '–'} – ${teamScore(game.away) ?? '–'} ${game.away.name ?? 'Away'}`,
+          title: 'Game',
+          headerRight: () => (
+            <Pressable onPress={more} accessibilityRole="button" accessibilityLabel="Export, edit or delete" style={styles.headerButton}>
+              <Svg width={22} height={22} viewBox="0 0 24 24" fill={c.text}>
+                <Path d="M5 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z" />
+              </Svg>
+            </Pressable>
+          ),
         }}
       />
-      <ScrollView
-        style={[base.screen, { backgroundColor: c.bg }]}
-        contentContainerStyle={base.content}
-        keyboardShouldPersistTaps="handled">
-        <View accessibilityRole="tablist" style={[styles.segment, { backgroundColor: c.sunken }]}>
-          {(['home', 'away'] as const).map((s) => {
-            const selected = s === side;
-            const count = issues.filter((i) => i.path.startsWith(`${s}.`)).length;
-            return (
-              <Pressable
-                key={s}
-                accessibilityRole="tab"
-                accessibilityState={{ selected }}
-                onPress={() => setSide(s)}
-                style={[styles.segmentItem, selected && { backgroundColor: c.card }]}>
-                <T style={{ fontFamily: fonts.bodySemiBold, color: selected ? c.text : c.muted }}>
-                  {game[s].name ?? (s === 'home' ? 'Home' : 'Away')}
-                  {count > 0 ? ` · ${count}` : ''}
+      <ScrollView style={[base.screen, { backgroundColor: c.bg }]} contentContainerStyle={[base.content, { gap: space.md }]}>
+        {/* Scoreboard */}
+        <View accessibilityLabel="Final score" style={[styles.board, { backgroundColor: c.card, borderColor: c.text }]}>
+          <View style={styles.between}>
+            <Pressable onPress={() => setEditing(true)} accessibilityRole="button" accessibilityHint="Edit date and place" style={{ flex: 1 }}>
+              <T muted style={{ fontSize: 13 }}>{when || 'Add date and place'}</T>
+            </Pressable>
+            <T muted style={{ fontSize: 13, fontFamily: fonts.bodyBold, letterSpacing: 0.6 }}>FINAL</T>
+          </View>
+          {SIDES.map((s, i) => (
+            <View key={s}>
+              {i === 1 && <View style={{ height: 1, backgroundColor: c.border, marginBottom: 8 }} />}
+              <View style={styles.teamLine}>
+                <T style={{ flex: 1, fontSize: 22, fontFamily: winner === s || !winner ? fonts.bodyBold : fonts.bodySemiBold, color: winner && winner !== s ? c.muted : c.text }}>
+                  {sideName(game, s)}
                 </T>
-              </Pressable>
-            );
-          })}
+                <T muted style={{ fontSize: 12, fontFamily: fonts.bodySemiBold }}>{s === 'home' ? 'HOME' : 'AWAY'}</T>
+                <T style={{ fontSize: 34, fontFamily: fonts.monoBold, minWidth: 60, textAlign: 'right', color: winner && winner !== s ? c.muted : c.text }}>
+                  {teamScore(game[s]) ?? '–'}
+                </T>
+              </View>
+            </View>
+          ))}
         </View>
 
-        {sideIssues.length > 0 && (
-          <Card style={{ backgroundColor: c.warnBg, borderColor: c.warnLine }}>
-            <T style={{ fontFamily: fonts.bodyBold, color: c.warn }}>
-              {sideIssues.length} thing{sideIssues.length === 1 ? '' : 's'} to check
+        {/* Check before it counts */}
+        {issues.length > 0 ? (
+          <View style={[styles.flag, { backgroundColor: c.warnBg }]}>
+            <T style={{ fontSize: 16, fontFamily: fonts.bodyBold, color: c.warn }}>
+              {issues.length === 1 ? '1 thing to check before this game counts' : `${issues.length} things to check before this game counts`}
             </T>
-            {sideIssues.map((i, k) => (
-              <T key={k} style={{ color: i.severity === 'error' ? c.error : c.text, fontSize: 14, lineHeight: 20 }}>
-                {i.message}
-              </T>
-            ))}
-          </Card>
+            <T style={{ fontSize: 14, lineHeight: 20 }}>Each one shows the part of the page InkStat read it from, so you can compare in seconds.</T>
+            <Pressable
+              onPress={() => router.push({ pathname: '/game/check', params: { id: game.id } })}
+              accessibilityRole="button"
+              style={[styles.smallButton, { backgroundColor: c.accent }]}>
+              <T style={{ color: c.accentText, fontFamily: fonts.bodySemiBold, fontSize: 15 }}>Check now  ›</T>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={[styles.flag, { backgroundColor: c.okBg }]}>
+            <T style={{ fontSize: 15, fontFamily: fonts.bodySemiBold, color: c.ok }}>✓ Everything adds up</T>
+          </View>
         )}
 
-        <TeamEditor
-          side={side}
-          team={game[side]}
-          issueAt={issueAt}
-          onChange={(fn) => updateTeam(side, fn)}
-          onZoom={setViewing}
-        />
-
-        <Card>
-          <View style={base.row}>
-            <Field label="Date" value={game.date} width={120} placeholder="yyyy-mm-dd" c={c}
-              onChange={(v) => update((g) => ({ ...g, date: v || null }))} />
-            <View style={{ flex: 1 }}>
-              <Field label="Location" value={game.location} c={c}
-                onChange={(v) => update((g) => ({ ...g, location: v || null }))} />
+        {/* Line score */}
+        <View accessibilityLabel="Score by quarter">
+          <T style={[styles.rule, { borderColor: c.text }]}>SCORE BY QUARTER</T>
+          <View style={styles.lineRow}>
+            <View style={{ flex: 1 }} />
+            {Array.from({ length: periods }, (_, i) => (
+              <T key={i} muted style={styles.lineHead}>{i < 4 ? `Q${i + 1}` : `OT${i - 3}`}</T>
+            ))}
+            <T muted style={[styles.lineHead, { width: 44, textAlign: 'right' }]}>T</T>
+          </View>
+          {SIDES.map((s) => (
+            <View key={s} style={[styles.lineRow, { borderTopWidth: 1, borderColor: c.border, paddingVertical: 8 }]}>
+              <T style={{ flex: 1, fontFamily: fonts.bodySemiBold }} >{sideName(game, s)}</T>
+              {Array.from({ length: periods }, (_, i) => (
+                <T key={i} style={styles.lineCell}>{game[s].periodScores[i] ?? '–'}</T>
+              ))}
+              <T style={[styles.lineCell, { width: 44, textAlign: 'right', fontFamily: fonts.monoBold }]}>{teamScore(game[s]) ?? '–'}</T>
             </View>
-          </View>
-        </Card>
-
-        <View style={base.row}>
-          <View style={{ flex: 1 }}>
-            <Button title="Export CSV" onPress={() => share('csv')} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Button title="Export JSON" kind="secondary" onPress={() => share('json')} />
-          </View>
+          ))}
         </View>
-        <Button title="Delete game" kind="danger" onPress={remove} />
+
+        {/* Leaders, per team */}
+        {SIDES.filter((s) => game[s].players.length > 0).map((s) => {
+          const top = [...game[s].players]
+            .filter((p) => p.points !== null)
+            .sort((a, b) => (b.points ?? 0) - (a.points ?? 0))
+            .slice(0, 3);
+          if (!top.length) return null;
+          return (
+            <View key={s}>
+              <T style={[styles.rule, { borderColor: c.text }]}>{`${sideName(game, s).toUpperCase()} LEADERS`}</T>
+              <View style={{ flexDirection: 'row' }}>
+                {top.map((p, i) => (
+                  <View key={i} style={{ flex: 1, paddingTop: 10, gap: 2 }}>
+                    <T style={{ fontSize: 24, fontFamily: fonts.monoBold }}>{p.points}</T>
+                    <T style={{ fontSize: 14, fontFamily: fonts.bodySemiBold }}>{p.name ?? `#${p.number ?? '?'}`}</T>
+                    <T muted style={{ fontSize: 12.5 }}>{[p.number ? `#${p.number}` : null, p.fouls !== null ? `${p.fouls} foul${p.fouls === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')}</T>
+                  </View>
+                ))}
+              </View>
+            </View>
+          );
+        })}
+
+        <Pressable
+          onPress={() => router.push({ pathname: '/game/box', params: { id: game.id } })}
+          accessibilityRole="button"
+          style={[styles.outline, { borderColor: c.accent }]}>
+          <T style={{ color: c.accent, fontFamily: fonts.bodySemiBold, fontSize: 15 }}>Full box score · both teams  ›</T>
+        </Pressable>
       </ScrollView>
 
-      <PhotoViewer photos={teamPhotos(game[side])} index={viewing} onClose={() => setViewing(null)} />
+      <EditSheet
+        visible={editing}
+        title="Date and place"
+        fields={editing ? [
+          { key: 'date', label: 'Date', value: game.date ?? '', placeholder: 'yyyy-mm-dd', flex: 1 },
+          { key: 'location', label: 'Played at', value: game.location ?? '', flex: 2 },
+        ] : []}
+        onClose={() => setEditing(false)}
+        onSave={(d) => {
+          setEditing(false);
+          void update((g) => ({ ...g, date: d.date.trim() || null, location: d.location.trim() || null }));
+        }}
+      />
     </>
   );
 }
 
-function TeamEditor({
-  side,
-  team,
-  issueAt,
-  onChange,
-  onZoom,
-}: {
-  side: Side;
-  team: TeamSheet;
-  issueAt: Map<string, Issue>;
-  onChange: (fn: (t: TeamSheet) => TeamSheet) => void;
-  /** Open the photo viewer at this index of teamPhotos(team). */
-  onZoom: (index: number) => void;
-}) {
-  const c = useColors();
-  const flag = (path: string) => issueAt.get(`${side}.${path}`);
-  const setPlayer = (i: number, patch: Partial<PlayerLine>) =>
-    onChange((t) => ({ ...t, players: t.players.map((p, k) => (k === i ? { ...p, ...patch } : p)) }));
-
-  return (
-    <Card>
-      <View style={base.row}>
-        <View style={{ flex: 1 }}>
-          <Field label={side === 'home' ? 'Home team' : 'Away team'} value={team.name} c={c}
-            onChange={(v) => onChange((t) => ({ ...t, name: v || null }))} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Field label="Coach" value={team.coach ?? null} c={c}
-            onChange={(v) => onChange((t) => ({ ...t, coach: v || null }))} />
-        </View>
-      </View>
-
-      {team.crops.length > 0 && (
-        <ScrollView horizontal contentContainerStyle={{ gap: space.sm }}>
-          {teamPhotos(team).map((p, i) => (
-            <Pressable key={p.uri} onPress={() => onZoom(i)} accessibilityLabel={`View ${p.label}`}>
-              <Image source={{ uri: p.uri }} style={styles.thumb} />
-            </Pressable>
-          ))}
-        </ScrollView>
-      )}
-
-      <T muted style={base.small}>Score by period</T>
-      <View style={[base.row, { flexWrap: 'wrap' }]}>
-        {team.periodScores.map((s, i) => (
-          <Cell key={i} label={i < 4 ? `Q${i + 1}` : `OT${i - 3}`} value={s} width={48} c={c}
-            issue={flag('periodScores')}
-            onChange={(v) => onChange((t) => ({ ...t, periodScores: t.periodScores.map((x, k) => (k === i ? v : x)) }))} />
-        ))}
-        <Cell label="Final" value={team.totalPoints} width={56} c={c} issue={flag('totalPoints')}
-          onChange={(v) => onChange((t) => ({ ...t, totalPoints: v }))} />
-        <Pressable onPress={() => onChange((t) => ({ ...t, periodScores: [...t.periodScores, null] }))}
-          accessibilityRole="button" style={styles.addOt}>
-          <T style={{ color: c.accent }}>+ OT</T>
-        </Pressable>
-      </View>
-
-      <View style={[base.row, { flexWrap: 'wrap', alignItems: 'flex-end' }]}>
-        <Cell label="Timeouts" value={team.timeoutsUsed} width={72} c={c}
-          onChange={(v) => onChange((t) => ({ ...t, timeoutsUsed: v }))} />
-        {(team.teamFouls?.length ? team.teamFouls : [null, null]).map((f, i, all) => (
-          <Cell key={i} label={all.length === 2 ? `Team fouls H${i + 1}` : `Team fouls ${i + 1}`} value={f} width={all.length === 2 ? 100 : 72} c={c}
-            onChange={(v) => onChange((t) => {
-              const cur = t.teamFouls?.length ? t.teamFouls : [null, null];
-              return { ...t, teamFouls: cur.map((x, k) => (k === i ? v : x)) };
-            })} />
-        ))}
-      </View>
-
-      {/* nestedScrollEnabled: on Android a horizontal list inside the vertical page needs it to receive swipes. */}
-      <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
-        <View>
-          <View style={styles.tableRow}>
-            <T muted style={[styles.head, { width: 44 }]}>#</T>
-            <T muted style={[styles.head, { width: 130 }]}>Name</T>
-            {STAT_COLUMNS.map((col) => (
-              <T key={col.key} muted style={[styles.head, { width: col.width }]}>{col.label}</T>
-            ))}
-          </View>
-          {team.players.map((p, i) => (
-            <View key={i}>
-              <View style={styles.tableRow}>
-                <Input value={p.number ?? ''} width={44} c={c} issue={flag(`players.${i}.number`)}
-                  keyboardType="number-pad" onChange={(v) => setPlayer(i, { number: v || null })} />
-                <Input value={p.name ?? ''} width={130} c={c} text
-                  onChange={(v) => setPlayer(i, { name: v || null })} />
-                {STAT_COLUMNS.map((col) => (
-                  <Input key={col.key} value={p[col.key] === null ? '' : String(p[col.key])} width={col.width} c={c}
-                    issue={flag(`players.${i}.${col.key}`)} keyboardType="number-pad"
-                    onChange={(v) => setPlayer(i, { [col.key]: toInt(v) })} />
-                ))}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove row ${i + 1}`}
-                  onPress={() => onChange((t) => ({ ...t, players: t.players.filter((_, k) => k !== i) }))}
-                  style={styles.remove}>
-                  <T style={{ color: c.error }}>✕</T>
-                </Pressable>
-              </View>
-              {p.readNotes.length > 0 && (
-                <T muted style={[base.small, { marginLeft: 4, marginBottom: 4 }]}>
-                  {p.readNotes.join('; ')}
-                </T>
-              )}
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-      <Button title="Add player" kind="secondary"
-        onPress={() => onChange((t) => ({ ...t, players: [...t.players, blankPlayer()] }))} />
-    </Card>
-  );
-}
-
-function Field({ label, value, onChange, width, placeholder, c }: {
-  label: string; value: string | null; onChange: (v: string) => void; width?: number; placeholder?: string; c: Colors;
-}) {
-  const [text, setText] = useState(value ?? '');
-  const [prev, setPrev] = useState(value);
-  if (value !== prev) {
-    // Value changed underneath us (e.g. reloaded): adopt it during render, not in an effect.
-    setPrev(value);
-    setText(value ?? '');
-  }
-  return (
-    <View style={{ width, gap: 2 }}>
-      <T muted style={base.small}>{label}</T>
-      <TextInput
-        value={text}
-        placeholder={placeholder}
-        placeholderTextColor={c.muted}
-        onChangeText={setText}
-        onEndEditing={() => onChange(text.trim())}
-        style={[styles.input, { color: c.text, borderColor: c.border }]}
-      />
-    </View>
-  );
-}
-
-function Cell({ label, value, onChange, width, issue, c }: {
-  label: string; value: number | null; onChange: (v: number | null) => void; width: number; issue?: Issue; c: Colors;
-}) {
-  return (
-    <View style={{ gap: 2 }}>
-      <T muted style={base.small}>{label}</T>
-      <Input value={value === null ? '' : String(value)} width={width} c={c} issue={issue}
-        keyboardType="number-pad" onChange={(v) => onChange(toInt(v))} />
-    </View>
-  );
-}
-
-/** Commits on blur so typing "12" does not save "1" then re-validate mid-keystroke. */
-function Input({ value, onChange, width, issue, keyboardType, text: isText, c }: {
-  value: string; onChange: (v: string) => void; width: number; issue?: Issue; keyboardType?: KeyboardTypeOptions;
-  /** Free text (names): body font, left-aligned. Default is a centered numeric cell. */
-  text?: boolean; c: Colors;
-}) {
-  const [text, setText] = useState(value);
-  const [prev, setPrev] = useState(value);
-  if (value !== prev) {
-    setPrev(value);
-    setText(value);
-  }
-  const bg = issue ? (issue.severity === 'error' ? c.errorBg : c.warnBg) : 'transparent';
-  const border = issue ? (issue.severity === 'error' ? c.error : c.warn) : c.border;
-  return (
-    <TextInput
-      value={text}
-      onChangeText={setText}
-      onEndEditing={() => text !== value && onChange(text.trim())}
-      keyboardType={keyboardType}
-      selectTextOnFocus
-      accessibilityHint={issue?.message}
-      style={[
-        styles.input,
-        styles.cell,
-        isText && { textAlign: 'left', fontFamily: fonts.body },
-        { width, color: c.text, backgroundColor: bg, borderColor: border },
-      ]}
-    />
-  );
-}
-
 const styles = StyleSheet.create({
-  input: {
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    fontSize: 15,
-    fontFamily: fonts.body,
-    minHeight: 44,
-  },
-  cell: { textAlign: 'center', marginRight: 4, fontFamily: fonts.mono, paddingHorizontal: 2 },
-  tableRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  head: { fontSize: 12, fontFamily: fonts.bodyBold, textAlign: 'center', marginRight: 4 },
-  segment: { flexDirection: 'row', borderRadius: radius.md, padding: 4 },
-  segmentItem: { flex: 1, minHeight: 44, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  remove: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  addOt: { paddingHorizontal: space.sm, paddingTop: 18 },
-  thumb: { width: 96, height: 72, borderRadius: 6 },
+  headerButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  board: { borderWidth: 1.5, borderRadius: radius.sm, paddingHorizontal: 14, paddingVertical: 12, gap: 8 },
+  between: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  teamLine: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  flag: { borderRadius: radius.sm, paddingHorizontal: 14, paddingVertical: 12, gap: 6 },
+  smallButton: { alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 16, borderRadius: radius.md, justifyContent: 'center', marginTop: 2 },
+  rule: { fontSize: 13, fontFamily: fonts.bodyBold, letterSpacing: 0.8, borderBottomWidth: 2, paddingBottom: 4 },
+  lineRow: { flexDirection: 'row', alignItems: 'center', paddingTop: 6 },
+  lineHead: { width: 36, textAlign: 'center', fontSize: 12, fontFamily: fonts.bodyBold },
+  lineCell: { width: 36, textAlign: 'center', fontFamily: fonts.mono, fontSize: 15 },
+  outline: { minHeight: 48, borderRadius: radius.md, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', marginTop: space.sm },
 });

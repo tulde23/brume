@@ -1,35 +1,40 @@
-import type { Game } from '@inkstat/basketball';
+import type { Game, ScorebookTemplate } from '@inkstat/basketball';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { ApiError, apiFetch, loadSession } from '@/auth/session';
 import {
+  clearTemplateTombstone,
   clearTombstone,
   deleteGameFromSync,
+  deleteTemplateFromSync,
   gamesUpdatedSince,
   getGame,
   getSetting,
+  getTemplate,
+  listTemplates,
+  listTemplateTombstones,
   listTombstones,
   saveGame,
+  saveTemplate,
   setSetting,
 } from '@/db';
 
 /**
- * Optional sync with the InkStat API. The phone stays the source of truth while
- * offline; a sync pushes local changes, then pulls everything newer from the
- * server. Conflicts are last-writer-wins on updatedAt, decided by the server.
+ * Sync with the InkStat API. The phone stays the source of truth while offline; a sync
+ * pushes local changes, then pulls everything newer. Conflicts are last-writer-wins on
+ * updatedAt, decided by the server.
+ *
+ * It syncs the signed-in account's own games and templates (`/v1/me/...`) on
+ * api.inkstat.app, so they follow the scorekeeper to any device. There is no server
+ * to configure.
  */
 
 const KEYS = {
-  url: 'sync.url',
-  apiKey: 'sync.apiKey',
-  cursor: 'sync.cursor',
-  pushedAt: 'sync.pushedAt',
   lastSync: 'sync.lastSync',
+  // Cursors and push marks are per destination, so switching never skips anything.
+  cursor: (dest: string, what: string) => `sync.${dest}.${what}.cursor`,
+  pushedAt: (dest: string, what: string) => `sync.${dest}.${what}.pushedAt`,
 } as const;
-
-export interface SyncConfig {
-  url: string;
-  apiKey: string;
-}
 
 export interface SyncResult {
   pushed: number;
@@ -38,62 +43,31 @@ export interface SyncResult {
   conflicts: number;
 }
 
-interface Change {
+interface Change<T> {
   id: string;
   deleted: boolean;
   updatedAt: number;
   seq: number;
-  game: Game | null;
+  game?: T | null;
+  data?: T | null;
 }
 
-export async function getSyncConfig(db: SQLiteDatabase): Promise<SyncConfig | null> {
-  const [url, apiKey] = await Promise.all([getSetting(db, KEYS.url), getSetting(db, KEYS.apiKey)]);
-  return url && apiKey ? { url, apiKey } : null;
-}
-
-export async function setSyncConfig(db: SQLiteDatabase, config: SyncConfig): Promise<void> {
-  const url = config.url.trim().replace(/\/+$/, '');
-  const previous = await getSetting(db, KEYS.url);
-  await setSetting(db, KEYS.url, url);
-  await setSetting(db, KEYS.apiKey, config.apiKey.trim());
-  if (previous !== url) {
-    // A different server: start its change feed from the beginning and re-send everything.
-    await setSetting(db, KEYS.cursor, '0');
-    await setSetting(db, KEYS.pushedAt, '0');
-  }
-}
+class SyncError extends Error {}
 
 export async function lastSyncedAt(db: SQLiteDatabase): Promise<number | null> {
   const v = await getSetting(db, KEYS.lastSync);
   return v ? Number(v) : null;
 }
 
-class SyncError extends Error {}
+type Send = (method: string, path: string, body?: unknown) => Promise<Response>;
 
-async function request(config: SyncConfig, method: string, path: string, body?: unknown): Promise<Response> {
-  let res: Response;
+const accountSender: Send = async (method, path, body) => {
   try {
-    res = await fetch(`${config.url}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${config.apiKey}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    throw new SyncError(`Could not reach ${config.url}. Check the address and your connection.`);
+    return await apiFetch(`/v1/me${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (e) {
+    throw new SyncError(e instanceof ApiError ? e.message : String(e));
   }
-  if (res.status === 401) throw new SyncError('The server rejected the API key.');
-  return res;
-}
-
-/** Check the address and key without changing anything. Returns the server's name for this key. */
-export async function testConnection(config: SyncConfig): Promise<string> {
-  const res = await request(config, 'GET', '/v1/me');
-  if (!res.ok) throw new SyncError(`Server answered ${res.status}`);
-  return ((await res.json()) as { space: string }).space;
-}
+};
 
 /** Keep this phone's photo paths when replacing a game with the server's copy. */
 function mergeLocalFiles(incoming: Game, local: Game | null): Game {
@@ -105,50 +79,45 @@ function mergeLocalFiles(incoming: Game, local: Game | null): Game {
   };
 }
 
-export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
-  const config = await getSyncConfig(db);
-  if (!config) throw new SyncError('Set the server address and API key first.');
-  const result: SyncResult = { pushed: 0, pulled: 0, deleted: 0, conflicts: 0 };
-  const startedAt = Date.now();
+async function detail(res: Response): Promise<string> {
+  const d = (await res.json().catch(() => ({}))) as { error?: string; issues?: string[] };
+  return d.issues?.[0] ?? d.error ?? String(res.status);
+}
 
-  // 1. Push local edits made since the last push.
-  const pushedAt = Number((await getSetting(db, KEYS.pushedAt)) ?? 0);
+export type Progress = (fraction: number, step: string) => void;
+
+async function syncGames(db: SQLiteDatabase, send: Send, dest: string, result: SyncResult, progress: Progress) {
+  progress(0.05, 'Sending games');
+  const startedAt = Date.now();
+  const pushedAt = Number((await getSetting(db, KEYS.pushedAt(dest, 'games'))) ?? 0);
   for (const game of await gamesUpdatedSince(db, pushedAt)) {
-    const res = await request(config, 'PUT', `/v1/games/${game.id}`, game);
+    const res = await send('PUT', `/games/${game.id}`, game);
     if (res.status === 409) {
-      // Someone saved a newer version; take it.
-      const { current } = (await res.json()) as { current: Change };
+      const { current } = (await res.json()) as { current: Change<Game> };
       result.conflicts++;
       if (current.deleted) await deleteGameFromSync(db, game.id);
       else if (current.game) await saveGame(db, mergeLocalFiles(current.game, game));
     } else if (!res.ok) {
-      const detail = (await res.json().catch(() => ({}))) as { error?: string; issues?: string[] };
-      throw new SyncError(`Could not upload a game: ${detail.issues?.[0] ?? detail.error ?? res.status}`);
-    } else {
-      result.pushed++;
-    }
+      throw new SyncError(`Could not upload a game: ${await detail(res)}`);
+    } else result.pushed++;
   }
-
-  // 2. Push local deletes.
   for (const t of await listTombstones(db)) {
-    const res = await request(config, 'DELETE', `/v1/games/${t.id}?deletedAt=${t.deletedAt}`);
+    const res = await send('DELETE', `/games/${t.id}?deletedAt=${t.deletedAt}`);
     if (res.status === 409) {
-      const { current } = (await res.json()) as { current: Change };
+      const { current } = (await res.json()) as { current: Change<Game> };
       result.conflicts++;
       if (current.game) await saveGame(db, current.game);
-    } else if (!res.ok) {
-      throw new SyncError(`Could not send a delete: ${res.status}`);
-    }
+    } else if (!res.ok) throw new SyncError(`Could not send a delete: ${res.status}`);
     await clearTombstone(db, t.id);
   }
-  await setSetting(db, KEYS.pushedAt, String(startedAt));
+  await setSetting(db, KEYS.pushedAt(dest, 'games'), String(startedAt));
+  progress(0.3, 'Getting games');
 
-  // 3. Pull everything the server has seen since our cursor.
-  let cursor = Number((await getSetting(db, KEYS.cursor)) ?? 0);
+  let cursor = Number((await getSetting(db, KEYS.cursor(dest, 'games'))) ?? 0);
   for (;;) {
-    const res = await request(config, 'GET', `/v1/games?since=${cursor}`);
+    const res = await send('GET', `/games?since=${cursor}`);
     if (!res.ok) throw new SyncError(`Could not download changes: ${res.status}`);
-    const page = (await res.json()) as { changes: Change[]; cursor: number; more: boolean };
+    const page = (await res.json()) as { changes: Change<Game>[]; cursor: number; more: boolean };
     for (const change of page.changes) {
       const local = await getGame(db, change.id);
       if (change.deleted) {
@@ -162,12 +131,86 @@ export async function syncNow(db: SQLiteDatabase): Promise<SyncResult> {
       }
     }
     cursor = page.cursor;
-    await setSetting(db, KEYS.cursor, String(cursor));
+    await setSetting(db, KEYS.cursor(dest, 'games'), String(cursor));
     if (!page.more) break;
   }
+}
 
-  await setSetting(db, KEYS.lastSync, String(Date.now()));
-  return result;
+async function syncTemplates(db: SQLiteDatabase, send: Send, dest: string, result: SyncResult, progress: Progress) {
+  progress(0.6, 'Sending templates');
+  const startedAt = Date.now();
+  const pushedAt = Number((await getSetting(db, KEYS.pushedAt(dest, 'templates'))) ?? 0);
+  // Templates on this phone keep their photo; the server never stores it.
+  const keepPhoto = (incoming: ScorebookTemplate, local: ScorebookTemplate | null): ScorebookTemplate => ({
+    ...incoming,
+    photoUri: local?.photoUri ?? null,
+  });
+  for (const t of (await listTemplates(db)).filter((x) => x.updatedAt > pushedAt)) {
+    const res = await send('PUT', `/templates/${encodeURIComponent(t.id)}`, t);
+    if (res.status === 409) {
+      const { current } = (await res.json()) as { current: Change<ScorebookTemplate> };
+      result.conflicts++;
+      if (current.deleted) await deleteTemplateFromSync(db, t.id);
+      else if (current.data) await saveTemplate(db, keepPhoto(current.data, t));
+    } else if (!res.ok) {
+      throw new SyncError(`Could not upload a template: ${await detail(res)}`);
+    } else result.pushed++;
+  }
+  for (const [id, deletedAt] of Object.entries(await listTemplateTombstones(db))) {
+    const res = await send('DELETE', `/templates/${encodeURIComponent(id)}?deletedAt=${deletedAt}`);
+    if (res.status === 409) {
+      const { current } = (await res.json()) as { current: Change<ScorebookTemplate> };
+      result.conflicts++;
+      if (current.data) await saveTemplate(db, keepPhoto(current.data, null));
+    } else if (!res.ok) throw new SyncError(`Could not send a template delete: ${res.status}`);
+    await clearTemplateTombstone(db, id);
+  }
+  await setSetting(db, KEYS.pushedAt(dest, 'templates'), String(startedAt));
+  progress(0.8, 'Getting templates');
+
+  let cursor = Number((await getSetting(db, KEYS.cursor(dest, 'templates'))) ?? 0);
+  for (;;) {
+    const res = await send('GET', `/templates?since=${cursor}`);
+    if (!res.ok) throw new SyncError(`Could not download templates: ${res.status}`);
+    const page = (await res.json()) as { changes: Change<ScorebookTemplate>[]; cursor: number; more: boolean };
+    for (const change of page.changes) {
+      const local = await getTemplate(db, change.id);
+      if (change.deleted) {
+        if (local && local.updatedAt <= change.updatedAt) {
+          await deleteTemplateFromSync(db, change.id);
+          result.deleted++;
+        }
+      } else if (change.data && (!local || local.updatedAt < change.updatedAt)) {
+        await saveTemplate(db, keepPhoto(change.data, local));
+        result.pulled++;
+      }
+    }
+    cursor = page.cursor;
+    await setSetting(db, KEYS.cursor(dest, 'templates'), String(cursor));
+    if (!page.more) break;
+  }
+}
+
+let running: Promise<SyncResult> | null = null;
+
+/** Push, then pull. One sync at a time; a second call joins the first. */
+export function syncNow(db: SQLiteDatabase, progress: Progress = () => undefined): Promise<SyncResult> {
+  running ??= (async () => {
+    try {
+      const session = await loadSession();
+      if (!session) throw new SyncError('Sign in to sync.');
+      const result: SyncResult = { pushed: 0, pulled: 0, deleted: 0, conflicts: 0 };
+      const dest = `u-${session.user.id}`;
+      await syncGames(db, accountSender, dest, result, progress);
+      await syncTemplates(db, accountSender, dest, result, progress);
+      await setSetting(db, KEYS.lastSync, String(Date.now()));
+      progress(1, 'Done');
+      return result;
+    } finally {
+      running = null;
+    }
+  })();
+  return running;
 }
 
 export { SyncError };

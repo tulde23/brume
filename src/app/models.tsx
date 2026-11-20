@@ -2,13 +2,14 @@ import { MODEL_CATALOG, type ModelSpec } from '@inkstat/ocr-engine';
 import { deleteModel, downloadModel, modelStatus, type ModelStatus } from '@inkstat/ocr-engine/native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 
 import { GEMINI_NANO_ID, getActiveModelId, nanoStatusDetail, setActiveModelId, unloadModel } from '@/engine/host';
 import { GeminiNanoBackend } from '@/engine/geminiNanoBackend';
 
 import { GeminiNano, type NanoStatus } from '../../modules/gemini-nano';
 import { Button, Card, ProgressBar, T, formatBytes } from '@/ui/components';
+import { useDialog } from '@/ui/Dialog';
 import { base, fonts, space, useColors } from '@/ui/theme';
 
 export default function Models() {
@@ -153,6 +154,7 @@ function ModelCard({
   onUse: () => void;
 }) {
   const c = useColors();
+  const dialog = useDialog();
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -175,19 +177,19 @@ function ModelCard({
     }
   };
 
-  const remove = () =>
-    Alert.alert(`Delete ${spec.name}?`, `Frees ${formatBytes(total)}. You can download it again later.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          if (active) await unloadModel();
-          deleteModel(spec);
-          onChanged();
-        },
-      },
-    ]);
+  const remove = async () => {
+    const ok = await dialog.confirm({
+      title: `Delete ${spec.name}?`,
+      body: `Frees ${formatBytes(total)}. You can download it again later.`,
+      confirm: 'Delete model',
+      cancel: 'Keep it',
+      destructive: true,
+    });
+    if (!ok) return;
+    if (active) await unloadModel();
+    deleteModel(spec);
+    onChanged();
+  };
 
   return (
     <Card style={active ? { borderColor: c.accent, borderWidth: 2 } : undefined}>

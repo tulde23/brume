@@ -1,24 +1,28 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { READ_IN_PROGRESS_KEY, clearSetting, deleteGame, getSetting, listGames } from '@/db';
+import { READ_IN_PROGRESS_KEY, clearSetting, clearTombstone, deleteGame, getSetting, listGames, saveGame } from '@/db';
 import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@inkstat/basketball';
 import { activeModel, type ActiveModel } from '@/engine/host';
 import { Badge, Button, Card, StatusDot, T } from '@/ui/components';
 import { deleteGameImages } from '@/lib/files';
 import { Logo } from '@/ui/Logo';
+import { SyncSheet } from '@/ui/SyncSheet';
+import { useDialog } from '@/ui/Dialog';
 import { base, fonts, space, useColors } from '@/ui/theme';
 
 export default function Home() {
   const db = useSQLiteContext();
   const c = useColors();
+  const dialog = useDialog();
   const [games, setGames] = useState<Game[]>([]);
   const [model, setModel] = useState<ActiveModel | null>(null);
   const [killedMidRead, setKilledMidRead] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -38,23 +42,44 @@ export default function Home() {
     }, [db]),
   );
 
-  const remove = (game: Game) =>
-    Alert.alert(
-      'Delete this game?',
-      `${game.home.name ?? 'Home'} vs ${game.away.name ?? 'Away'}${game.date ? `, ${game.date}` : ''}. The box score and page photos will be removed.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteGame(db, game.id);
-            deleteGameImages(game.id);
-            setGames((list) => list.filter((g) => g.id !== game.id));
-          },
+  const remove = async (game: Game) => {
+    const home = teamScore(game.home);
+    const away = teamScore(game.away);
+    const ok = await dialog.confirm({
+      title: 'Delete this game?',
+      subject: {
+        label: `${game.home.name ?? 'Home'} vs ${game.away.name ?? 'Away'}`,
+        value: home !== null && away !== null ? `${home}–${away}` : undefined,
+      },
+      body: 'The box score and both page photos go. Your templates stay.',
+      confirm: 'Delete game',
+      cancel: 'Keep it',
+      destructive: true,
+    });
+    if (!ok) return;
+    await deleteGame(db, game.id);
+    setGames((list) => list.filter((g) => g.id !== game.id));
+    // Photos go only once the undo has passed, so Undo can bring the game back whole.
+    let undone = false;
+    const purge = setTimeout(() => {
+      if (!undone) deleteGameImages(game.id);
+    }, 6000);
+    dialog.toast({
+      text: 'Game deleted',
+      duration: 5500,
+      action: {
+        label: 'Undo',
+        onPress: () => {
+          undone = true;
+          clearTimeout(purge);
+          // Undo also drops the sync tombstone, or the next sync would delete it again.
+          void clearTombstone(db, game.id)
+            .then(() => saveGame(db, game))
+            .then(() => listGames(db).then(setGames));
         },
-      ],
-    );
+      },
+    });
+  };
 
   const season = seasonFor(null);
   const top = useMemo(() => seasonTotals(games.filter((g) => g.season === season))[0], [games, season]);
@@ -74,9 +99,9 @@ export default function Home() {
               </Pressable>
               <View style={base.row}>
               <Pressable
-                onPress={() => router.push('/sync')}
+                onPress={() => setSyncing(true)}
                 accessibilityRole="button"
-                accessibilityLabel="Sync with server"
+                accessibilityLabel="Sync"
                 style={styles.iconButton}>
                 <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={c.text} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                   <Path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4 4 0 0 1-1 8.5" />
@@ -185,6 +210,7 @@ export default function Home() {
         renderItem={({ item }) => <GameRow game={item} onDelete={() => remove(item)} />}
         ItemSeparatorComponent={() => <View style={{ height: space.sm + 2 }} />}
       />
+      <SyncSheet visible={syncing} onClose={() => setSyncing(false)} onSynced={() => void listGames(db).then(setGames)} />
     </SafeAreaView>
   );
 }

@@ -166,9 +166,35 @@ export async function saveTemplate(db: SQLiteDatabase, template: ScorebookTempla
 }
 
 export async function deleteTemplate(db: SQLiteDatabase, id: string): Promise<void> {
+  await deleteTemplateFromSync(db, id);
+  // Remembered so the next sync tells the server, and other devices learn of the delete.
+  const tombs = await listTemplateTombstones(db);
+  tombs[id] = Date.now();
+  await setSetting(db, TEMPLATE_TOMBSTONES_KEY, JSON.stringify(tombs));
+}
+
+const TEMPLATE_TOMBSTONES_KEY = 'templates.basketball.tombstones';
+
+/** Removes a template because the server said so: no tombstone to send back. */
+export async function deleteTemplateFromSync(db: SQLiteDatabase, id: string): Promise<void> {
   const list = await readTemplates(db);
   await setSetting(db, TEMPLATES_KEY, JSON.stringify(list.filter((t) => t.id !== id)));
   if ((await getSetting(db, ACTIVE_TEMPLATE_KEY)) === id) await clearSetting(db, ACTIVE_TEMPLATE_KEY);
+}
+
+export async function listTemplateTombstones(db: SQLiteDatabase): Promise<Record<string, number>> {
+  const raw = await getSetting(db, TEMPLATE_TOMBSTONES_KEY);
+  try {
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function clearTemplateTombstone(db: SQLiteDatabase, id: string): Promise<void> {
+  const tombs = await listTemplateTombstones(db);
+  delete tombs[id];
+  await setSetting(db, TEMPLATE_TOMBSTONES_KEY, JSON.stringify(tombs));
 }
 
 /** The template scans use; null means read the page without one. */

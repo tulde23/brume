@@ -21,15 +21,15 @@ export function Button({
 }: {
   title: string;
   onPress: () => void;
-  kind?: 'primary' | 'secondary' | 'danger';
+  kind?: 'primary' | 'secondary' | 'danger' | 'dangerSolid';
   size?: 'md' | 'lg';
   disabled?: boolean;
   busy?: boolean;
   icon?: ReactNode;
 }) {
   const c = useColors();
-  const bg = kind === 'primary' ? c.accent : 'transparent';
-  const fg = kind === 'primary' ? c.accentText : kind === 'danger' ? c.error : c.accent;
+  const bg = kind === 'primary' ? c.accent : kind === 'dangerSolid' ? c.error : 'transparent';
+  const fg = kind === 'primary' || kind === 'dangerSolid' ? c.accentText : kind === 'danger' ? c.error : c.accent;
   return (
     <Pressable
       accessibilityRole="button"
@@ -39,7 +39,7 @@ export function Button({
       style={({ pressed }) => [
         styles.button,
         size === 'lg' && styles.buttonLg,
-        { backgroundColor: bg, borderColor: kind === 'primary' ? bg : fg, opacity: disabled ? 0.4 : pressed ? 0.75 : 1 },
+        { backgroundColor: bg, borderColor: kind === 'primary' || kind === 'dangerSolid' ? bg : fg, opacity: disabled ? 0.4 : pressed ? 0.75 : 1 },
       ]}>
       {busy ? (
         <ActivityIndicator color={fg} />

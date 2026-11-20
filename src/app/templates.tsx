@@ -2,11 +2,12 @@ import { isUsable, markedParts, type ScorebookTemplate } from '@inkstat/basketba
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { deleteTemplate, getActiveTemplate, listTemplates, setActiveTemplate } from '@/db';
 import { deleteGameImages } from '@/lib/files';
 import { Badge, Card, T } from '@/ui/components';
+import { useDialog } from '@/ui/Dialog';
 import { base, fonts, space, useColors } from '@/ui/theme';
 
 const HOW = [
@@ -19,6 +20,7 @@ const HOW = [
 export default function Templates() {
   const db = useSQLiteContext();
   const c = useColors();
+  const dialog = useDialog();
   const [list, setList] = useState<ScorebookTemplate[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -33,31 +35,41 @@ export default function Templates() {
     }, [load]),
   );
 
+  const remove = async (t: ScorebookTemplate) => {
+    const ok = await dialog.confirm({
+      title: 'Delete this template?',
+      subject: { label: t.name },
+      body: 'Games already read keep their results. Pages from this book will need a new template.',
+      confirm: 'Delete template',
+      cancel: 'Keep it',
+      destructive: true,
+    });
+    if (!ok) return;
+    await deleteTemplate(db, t.id);
+    deleteGameImages(t.id);
+    await load();
+    dialog.toast({ text: `Deleted ${t.name}` });
+  };
+
   const actions = (t: ScorebookTemplate) =>
-    Alert.alert(t.name, undefined, [
-      ...(isUsable(t) && t.id !== activeId
-        ? [{ text: 'Use for scans', onPress: async () => { await setActiveTemplate(db, t.id); await load(); } }]
-        : []),
-      { text: 'Edit', onPress: () => router.push({ pathname: '/template-editor', params: { id: t.id } }) },
-      {
-        text: 'Delete',
-        style: 'destructive' as const,
-        onPress: () =>
-          Alert.alert(`Delete ${t.name}?`, 'Games already read keep their results.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete',
-              style: 'destructive',
+    dialog.actions(
+      t.name,
+      [
+        ...(isUsable(t) && t.id !== activeId
+          ? [{
+              label: 'Use by default',
+              hint: 'Picked first when no page matches better',
               onPress: async () => {
-                await deleteTemplate(db, t.id);
-                deleteGameImages(t.id);
+                await setActiveTemplate(db, t.id);
                 await load();
               },
-            },
-          ]),
-      },
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
+            }]
+          : []),
+        { label: 'Edit', hint: 'Move boxes, add or remove parts', onPress: () => router.push({ pathname: '/template-editor', params: { id: t.id } }) },
+        { label: 'Delete', destructive: true, onPress: () => void remove(t) },
+      ],
+      `${markedParts(t).length} of ${t.enabled.length} parts marked`,
+    );
 
   return (
     <ScrollView style={[base.screen, { backgroundColor: c.bg }]} contentContainerStyle={[base.content, { gap: space.md }]}>

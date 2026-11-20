@@ -57,15 +57,21 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F3F5F7",
+          "backgroundColor": "#F7F3EA",
           "image": "./assets/splash-icon.png",
           "imageWidth": 160,
           "dark": {
             "image": "./assets/splash-icon-dark.png",
-            "backgroundColor": "#0E1116"
+            "backgroundColor": "#1A1814"
           }
         }
-      ]
-    ]
+      ],
+      "expo-secure-store"
+    ],
+    "extra": {
+      "apiUrl": "https://api.inkstat.app",
+      "googleWebClientId": "593369503246-rbkvt3c7a0g42omtr6in500egst4rqai.apps.googleusercontent.com",
+      "appleSignIn": false
+    }
   }
 }

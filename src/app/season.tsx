@@ -1,11 +1,12 @@
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { listGames, listSeasons } from '@/db';
 import { pct, perGame, seasonToCsv, seasonTotals, teamNames, type Game } from '@inkstat/basketball';
 import { shareText } from '@/lib/files';
 import { Button, T } from '@/ui/components';
+import { useDialog } from '@/ui/Dialog';
 import { base, space, useColors } from '@/ui/theme';
 
 const COLS = [
@@ -22,6 +23,7 @@ const COLS = [
 ];
 
 export default function Season() {
+  const dialog = useDialog();
   const db = useSQLiteContext();
   const c = useColors();
   const [seasons, setSeasons] = useState<string[]>([]);
@@ -112,7 +114,7 @@ export default function Season() {
         title="Export season CSV"
         onPress={() =>
           shareText(`season-${season}${team ? `-${team}` : ''}.csv`.replace(/[^a-z0-9.-]+/gi, '_'), seasonToCsv(lines), 'text/csv').catch(
-            (e) => Alert.alert('Could not share', e instanceof Error ? e.message : String(e)),
+            (e) => void dialog.notice('Could not share', e instanceof Error ? e.message : String(e)),
           )
         }
       />
