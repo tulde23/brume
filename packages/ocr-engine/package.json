@@ -1,0 +1,17 @@
+{
+  "name": "@brume/ocr-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "On-device document extraction: run a vision LLM over regions of a photographed page and get schema-checked JSON back. Knows nothing about any specific document type.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "expo-file-system": "*",
+    "expo-image-manipulator": "*",
+    "llama.rn": "*"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./native": "./src/native.ts"
+  }
+}

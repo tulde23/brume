@@ -1,0 +1,75 @@
+import { initLlama, type LlamaContext, type RNLlamaOAICompatibleMessage } from 'llama.rn';
+
+import type { ModelSpec } from './models';
+import type { GenerateRequest, VisionBackend } from './types';
+
+/** On-device vision backend: llama.cpp via llama.rn, with the model's mmproj for images. */
+export class LlamaVisionBackend implements VisionBackend {
+  private constructor(
+    private readonly ctx: LlamaContext,
+    readonly modelId: string,
+    readonly usingGpu: boolean,
+  ) {}
+
+  static async load(
+    spec: ModelSpec,
+    paths: { model: string; mmproj: string },
+    onProgress?: (fraction: number) => void,
+  ): Promise<LlamaVisionBackend> {
+    const ctx = await initLlama(
+      {
+        model: paths.model,
+        n_ctx: spec.contextSize,
+        n_gpu_layers: 99,
+        // Context shifting corrupts image tokens; llama.rn requires it off for multimodal.
+        ctx_shift: false,
+        use_mlock: false,
+      },
+      (p) => onProgress?.(p / 100),
+    );
+    const ok = await ctx.initMultimodal({
+      path: paths.mmproj,
+      use_gpu: true,
+      image_max_tokens: spec.imageMaxTokens,
+    });
+    if (!ok) {
+      await ctx.release();
+      throw new Error('This model could not load its vision projector');
+    }
+    return new LlamaVisionBackend(ctx, spec.id, Boolean(ctx.gpu));
+  }
+
+  async generate(req: GenerateRequest): Promise<string> {
+    const messages: RNLlamaOAICompatibleMessage[] = [];
+    if (req.system) messages.push({ role: 'system', content: req.system });
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: req.imageUri } },
+        { type: 'text', text: req.prompt },
+      ],
+    });
+
+    const stop = () => void this.ctx.stopCompletion();
+    req.signal?.addEventListener('abort', stop);
+    try {
+      const result = await this.ctx.completion({
+        messages,
+        response_format: req.jsonSchema
+          ? { type: 'json_schema', json_schema: { strict: true, schema: req.jsonSchema } }
+          : undefined,
+        n_predict: req.maxTokens ?? 1024,
+        temperature: req.temperature ?? 0,
+        top_k: 20,
+      });
+      if (req.signal?.aborted) throw new Error('Extraction cancelled');
+      return result.content || result.text;
+    } finally {
+      req.signal?.removeEventListener('abort', stop);
+    }
+  }
+
+  async release(): Promise<void> {
+    await this.ctx.release();
+  }
+}
