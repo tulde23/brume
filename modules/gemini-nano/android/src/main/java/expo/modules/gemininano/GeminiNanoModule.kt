@@ -112,23 +112,32 @@ class GeminiNanoModule : Module() {
      * them, and save as PNG. Used to cut the middle out of wide table rows so the
      * kept columns stay row-aligned in one image.
      */
-    AsyncFunction("joinImages") { uris: List<String>, outPath: String ->
+    /**
+     * Join images into one PNG with a dark bar between them: side by side (rows stay
+     * aligned) or, with vertical = true, stacked top to bottom (several small, wide
+     * boxes become one near-square image, so a model that resizes to a square keeps
+     * the writing large).
+     */
+    AsyncFunction("joinImages") { uris: List<String>, outPath: String, vertical: Boolean? ->
       require(uris.isNotEmpty()) { "joinImages needs at least one image" }
+      val down = vertical == true
       val bitmaps = uris.map { loadBitmap(it) }
       val bar = 6
-      val height = bitmaps.maxOf { it.height }
-      val width = bitmaps.sumOf { it.width } + bar * (bitmaps.size - 1)
+      val gaps = bar * (bitmaps.size - 1)
+      val width = if (down) bitmaps.maxOf { it.width } else bitmaps.sumOf { it.width } + gaps
+      val height = if (down) bitmaps.sumOf { it.height } + gaps else bitmaps.maxOf { it.height }
       val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
       val canvas = android.graphics.Canvas(out)
       canvas.drawColor(android.graphics.Color.WHITE)
       val barPaint = android.graphics.Paint().apply { color = android.graphics.Color.rgb(40, 40, 40) }
-      var x = 0f
+      var at = 0f
       bitmaps.forEachIndexed { i, b ->
-        canvas.drawBitmap(b, x, 0f, null)
-        x += b.width
+        if (down) canvas.drawBitmap(b, 0f, at, null) else canvas.drawBitmap(b, at, 0f, null)
+        at += if (down) b.height else b.width
         if (i < bitmaps.lastIndex) {
-          canvas.drawRect(x, 0f, x + bar, height.toFloat(), barPaint)
-          x += bar
+          if (down) canvas.drawRect(0f, at, width.toFloat(), at + bar, barPaint)
+          else canvas.drawRect(at, 0f, at + bar, height.toFloat(), barPaint)
+          at += bar
         }
       }
       val path = Uri.parse(outPath).path ?: outPath

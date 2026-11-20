@@ -79,6 +79,12 @@ export interface ColumnSpec {
 }
 
 /** One area of the page to read, and what to read out of it. */
+export interface PieceSpec {
+  rect: NormRect;
+  /** What the piece holds, as the model is told it (e.g. "coach's name"). */
+  label: string;
+}
+
 export interface RegionSpec {
   id: string;
   label: string;
@@ -95,6 +101,19 @@ export interface RegionSpec {
    * columns larger. If the device cannot join images, the full-width strip is sent.
    */
   joinColumns?: boolean;
+  /**
+   * Separate small boxes read in ONE request (e.g. team name, coach and date in a
+   * page header): each is cropped, then they are joined side by side, left to right
+   * in this order. Overrides `rect` for cropping; never tiled. Without native
+   * joining they are sent as separate images.
+   */
+  pieces?: PieceSpec[];
+  /**
+   * Stack the pieces top to bottom instead of side by side. Several small, wide
+   * boxes (header fields) then make a near-square image, so a model that resizes
+   * its input to a square keeps the handwriting large.
+   */
+  stackPieces?: boolean;
   /** Longest side, in pixels, of each crop sent to the model. */
   maxImageSide?: number;
   maxTokens?: number;
@@ -189,6 +208,20 @@ export interface GenerateResult {
 export interface ImageOps {
   size(uri: string): Promise<{ width: number; height: number }>;
   crop(uri: string, rect: PixelRect, maxSide: number): Promise<string>;
-  /** Optional: place images side by side (left to right) into one. Needed for `joinColumns`. */
-  join?(uris: string[]): Promise<string>;
+  /**
+   * Optional: place images side by side (left to right) into one, or stacked top to
+   * bottom with `vertical`. Needed for `joinColumns` and `pieces`.
+   */
+  join?(uris: string[], options?: { vertical?: boolean }): Promise<string>;
+}
+
+/** A word of text found on a page, with where it is (fractions of the image, 0..1). */
+export interface TextWord {
+  text: string;
+  rect: NormRect;
+}
+
+/** A line of text found on a page (e.g. by on-device OCR), used to place template boxes. */
+export interface TextLine extends TextWord {
+  words: TextWord[];
 }

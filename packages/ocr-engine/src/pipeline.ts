@@ -29,6 +29,10 @@ const MAX_TOKEN_CEILING = 2048;
 export type ColumnLayout = 'full' | 'separate' | 'joined';
 
 export function columnLayout(region: RegionSpec, images: Pick<ImageOps, 'join'>): ColumnLayout {
+  if (region.pieces?.length) {
+    if (region.pieces.length === 1) return 'full';
+    return images.join ? 'joined' : 'separate';
+  }
   if (!region.columns?.length) return 'full';
   if (!region.joinColumns) return 'separate';
   // Joining needs native image compositing; without it, fall back to the whole strip.
@@ -42,9 +46,24 @@ export function buildPrompt(
   tiles: number,
   layout: ColumnLayout = region.columns?.length && !region.joinColumns ? 'separate' : 'full',
 ) {
-  const cols = region.columns ?? [];
-  const images =
-    layout === 'separate' && cols.length > 1
+  const cols = region.pieces ?? region.columns ?? [];
+  const images = region.pieces?.length
+    ? cols.length < 2
+      ? ''
+      : layout === 'joined'
+        ? region.stackPieces
+          ? `\nThis image is ${cols.length} separate boxes cut from the page and stacked top to bottom, ` +
+            'separated by dark horizontal bars. From top to bottom: ' +
+            cols.map((c) => c.label).join(' | ') +
+            '. Read each box on its own.'
+          : `\nThis image is ${cols.length} separate boxes cut from the page and joined left to right, ` +
+            'separated by dark vertical bars: ' +
+            cols.map((c) => c.label).join(' | ') +
+            '. Read each box on its own.'
+        : `\nYou are given ${cols.length} images, each a separate box from the page: ` +
+          cols.map((c, i) => `image ${i + 1} is the ${c.label}`).join('; ') +
+          '.'
+    : layout === 'separate' && cols.length > 1
       ? `\nYou are given ${cols.length} images of the SAME rows, side by side on the page: ` +
         cols.map((c, i) => `image ${i + 1} is the ${c.label}`).join('; ') +
         '. Row k in one image is row k in the others; match them top to bottom.'
@@ -98,10 +117,13 @@ export async function runTemplate(
     : template.regions;
 
   const jobs = regions.flatMap((region) =>
-    tileRects(
-      region.rect,
-      region.tiles,
-      stripCount(region, width, height, columnLayout(region, images) === 'joined'),
+    (region.pieces?.length
+      ? [region.rect]
+      : tileRects(
+          region.rect,
+          region.tiles,
+          stripCount(region, width, height, columnLayout(region, images) === 'joined'),
+        )
     ).map((rect, tileIndex, all) => ({
       region,
       rect,
@@ -130,15 +152,19 @@ export async function runTemplate(
     const t0 = Date.now();
     const maxSide = job.region.maxImageSide ?? DEFAULT_MAX_SIDE;
     const layout = columnLayout(job.region, images);
-    const slices =
-      layout === 'full'
+    const slices = job.region.pieces?.length
+      ? job.region.pieces.map((p) => p.rect)
+      : layout === 'full'
         ? [job.rect]
         : job.region.columns!.map((c) => ({ x: c.x, y: job.rect.y, w: c.w, h: job.rect.h }));
     let imageUris: string[] = [];
     for (const slice of slices) {
       imageUris.push(await images.crop(sourceUri, toPixels(slice, width, height), maxSide));
     }
-    if (layout === 'joined') imageUris = [await images.join!(imageUris)];
+    if (layout === 'joined') {
+      const vertical = !!job.region.stackPieces && !!job.region.pieces?.length;
+      imageUris = [await images.join!(imageUris, { vertical })];
+    }
     const imageUri = imageUris[0];
     const prompt = buildPrompt(template, job.region, job.tileIndex, job.tileCount, layout);
     const jsonSchema = toJsonSchema(job.region.schema);

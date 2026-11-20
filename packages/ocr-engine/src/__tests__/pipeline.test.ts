@@ -170,6 +170,50 @@ describe('runTemplate', () => {
     });
   });
 
+  describe('pieces', () => {
+    const header: DocumentTemplate = {
+      ...template,
+      regions: [
+        {
+          ...template.regions[0],
+          tiles: { rows: 4, overlap: 0.1 },
+          pieces: [
+            { rect: { x: 0.125, y: 0, w: 0.25, h: 0.125 }, label: 'team name' },
+            { rect: { x: 0.5, y: 0, w: 0.125, h: 0.125 }, label: 'date' },
+          ],
+        },
+      ],
+    };
+    const ops = (log: string[]): ImageOps => ({
+      size: async () => ({ width: 1000, height: 1000 }),
+      crop: async (_u, r) => {
+        const id = `${r.originX},${r.originY},${r.width}x${r.height}`;
+        log.push(id);
+        return id;
+      },
+      join: async (uris) => `join(${uris.join('+')})`,
+    });
+
+    it('crops each box, joins them in order, and reads them once (never tiled)', async () => {
+      const crops: string[] = [];
+      const backend = fakeBackend(['{"n": 1}']);
+      const run = await runTemplate(backend, ops(crops), 'page.jpg', header);
+      expect(backend.calls).toHaveLength(1);
+      expect(backend.calls[0].imageUris).toEqual(['join(125,0,250x125+500,0,125x125)']);
+      expect(backend.calls[0].prompt).toContain('team name | date');
+      expect(backend.calls[0].prompt).toContain('separate boxes');
+      expect(run.results[0].imageUris).toEqual(['join(125,0,250x125+500,0,125x125)']);
+    });
+
+    it('crops a single piece on its own', async () => {
+      const one = { ...header, regions: [{ ...header.regions[0], pieces: [header.regions[0].pieces![1]] }] };
+      const backend = fakeBackend(['{"n": 1}']);
+      await runTemplate(backend, ops([]), 'page.jpg', one);
+      expect(backend.calls[0].imageUris).toEqual(['500,0,125x125']);
+      expect(backend.calls[0].prompt).not.toContain('separate boxes');
+    });
+  });
+
   it('gives a cut-off answer a bigger budget instead of a warmer retry', async () => {
     const backend = fakeBackend([{ text: '{"n": 1', cut: true }, '{"n": 1}', '{"n": 2}']);
     const run = await runTemplate(backend, fakeImages, 'page.jpg', template);
@@ -216,5 +260,43 @@ describe('runTemplate', () => {
     await expect(
       runTemplate(fakeBackend([]), fakeImages, 'page.jpg', template, { signal: controller.signal }),
     ).rejects.toThrow('cancelled');
+  });
+});
+
+describe('stacked pieces', () => {
+  it('asks the image ops to stack pieces vertically and says so in the prompt', async () => {
+    const calls: { uris: string[]; vertical?: boolean }[] = [];
+    const ops: ImageOps = {
+      size: async () => ({ width: 1000, height: 1000 }),
+      crop: async (_u, r) => `${r.originX},${r.originY}`,
+      join: async (uris, o) => {
+        calls.push({ uris, vertical: o?.vertical });
+        return 'joined';
+      },
+    };
+    const backend = fakeBackend(['{"n": 1}']);
+    const doc: DocumentTemplate = {
+      id: 't',
+      name: 't',
+      version: 1,
+      regions: [
+        {
+          id: 'details',
+          label: 'Details',
+          rect: { x: 0, y: 0, w: 0.5, h: 0.1 },
+          prompt: 'Read.',
+          schema: { type: 'object', properties: { n: { type: 'integer', nullable: true } } },
+          pieces: [
+            { rect: { x: 0, y: 0, w: 0.25, h: 0.125 }, label: 'team name' },
+            { rect: { x: 0.5, y: 0, w: 0.25, h: 0.125 }, label: 'date' },
+          ],
+          stackPieces: true,
+        },
+      ],
+    };
+    await runTemplate(backend, ops, 'page.jpg', doc);
+    expect(calls).toEqual([{ uris: ['0,0', '500,0'], vertical: true }]);
+    expect(backend.calls[0].prompt).toContain('stacked top to bottom');
+    expect(backend.calls[0].prompt).toContain('team name | date');
   });
 });

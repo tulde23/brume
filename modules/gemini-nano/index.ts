@@ -9,8 +9,8 @@ interface NativeGeminiNano {
   baseModelName(): Promise<string>;
   download(): Promise<void>;
   warmup(): Promise<void>;
-  /** Side by side, left to right, with a dark bar between; returns a file:// URI. */
-  joinImages(uris: string[], outPath: string): Promise<string>;
+  /** Side by side (or stacked when vertical), with a dark bar between; returns a file:// URI. */
+  joinImages(uris: string[], outPath: string, vertical?: boolean): Promise<string>;
   generate(
     requestId: number,
     imageUris: string[],

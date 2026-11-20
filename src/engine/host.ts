@@ -140,7 +140,8 @@ let joinCount = 0;
 const imageOps: ImageOps = GeminiNano
   ? {
       ...expoImageOps,
-      join: (uris) => GeminiNano!.joinImages(uris, new File(Paths.cache, `join-${Date.now()}-${joinCount++}.png`).uri),
+      join: (uris, options) =>
+        GeminiNano!.joinImages(uris, new File(Paths.cache, `join-${Date.now()}-${joinCount++}.png`).uri, !!options?.vertical),
     }
   : expoImageOps;
 

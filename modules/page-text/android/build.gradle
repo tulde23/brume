@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.pagetext'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.pagetext"
+  defaultConfig {
+    minSdkVersion 26
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // On-device Latin text recognition, bundled into the app (no download, works offline).
+  // Used to find a scorebook's printed labels so template boxes start in the right place.
+  implementation "com.google.mlkit:text-recognition:16.0.1"
+}
