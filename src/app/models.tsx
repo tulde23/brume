@@ -4,9 +4,12 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 
-import { getActiveModelId, setActiveModelId, unloadModel } from '@/engine/host';
+import { GEMINI_NANO_ID, getActiveModelId, nanoStatusDetail, setActiveModelId, unloadModel } from '@/engine/host';
+import { GeminiNanoBackend } from '@/engine/geminiNanoBackend';
+
+import { GeminiNano, type NanoStatus } from '../../modules/gemini-nano';
 import { Button, Card, ProgressBar, T, formatBytes } from '@/ui/components';
-import { base, space, useColors } from '@/ui/theme';
+import { base, fonts, space, useColors } from '@/ui/theme';
 
 export default function Models() {
   const db = useSQLiteContext();
@@ -28,6 +31,15 @@ export default function Models() {
         Models run entirely on this phone; pages never leave it. Downloads are large, so use Wi-Fi. Phones with
         6 GB of RAM or more work best.
       </T>
+      {GeminiNanoBackend.isSupported() && (
+        <NanoCard
+          active={active === GEMINI_NANO_ID}
+          onUse={async () => {
+            await setActiveModelId(db, GEMINI_NANO_ID);
+            setActive(GEMINI_NANO_ID);
+          }}
+        />
+      )}
       {MODEL_CATALOG.map((m) => (
         <ModelCard
           key={m.id}
@@ -42,6 +54,88 @@ export default function Models() {
         />
       ))}
     </ScrollView>
+  );
+}
+
+const NANO_STATUS_TEXT: Record<NanoStatus, string> = {
+  available: 'Ready',
+  downloadable: 'Not downloaded',
+  downloading: 'Downloading',
+  unavailable: 'Not supported',
+};
+
+/**
+ * Gemini Nano is installed and updated by Android (AICore), not by Brume. On
+ * Pixel 10 it runs on the Tensor TPU, far faster than the downloadable models.
+ */
+function NanoCard({ active, onUse }: { active: boolean; onUse: () => void }) {
+  const c = useColors();
+  const [status, setStatus] = useState<NanoStatus | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ bytes: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    nanoStatusDetail().then((r) => {
+      setStatus(r.status);
+      setDetail(r.detail);
+    });
+  }, []);
+  useEffect(refresh, [refresh]);
+
+  const download = async () => {
+    if (!GeminiNano) return;
+    setError(null);
+    setProgress({ bytes: 0, total: 0 });
+    const sub = GeminiNano.addListener('onDownloadProgress', setProgress);
+    try {
+      await GeminiNano.download();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      sub.remove();
+      setProgress(null);
+      refresh();
+    }
+  };
+
+  return (
+    <Card style={active ? { borderColor: c.accent, borderWidth: 2 } : undefined}>
+      <View style={[base.row, { justifyContent: 'space-between' }]}>
+        <T style={base.h2}>Gemini Nano</T>
+        <T muted>{active ? 'In use' : status ? NANO_STATUS_TEXT[status] : '…'}</T>
+      </View>
+      <T muted>
+        Built into Android and runs on this phone&apos;s AI chip, so it is much faster where supported. Managed by
+        Android; Brume only needs Brume to stay open while reading.
+      </T>
+      {progress && (
+        <View style={{ gap: space.xs }}>
+          <ProgressBar fraction={progress.total ? progress.bytes / progress.total : 0} />
+          <T muted style={base.small}>
+            {progress.total ? `${formatBytes(progress.bytes)} of ${formatBytes(progress.total)}` : 'Starting…'}
+          </T>
+        </View>
+      )}
+      {error && <T style={{ color: c.error }}>{error}</T>}
+      {status === 'unavailable' && (
+        <T muted style={base.small}>
+          This phone does not offer Gemini Nano to apps (or Android has not set it up yet). Use a downloadable
+          model below.
+        </T>
+      )}
+      {detail && (
+        <T muted style={[base.small, { fontFamily: fonts.mono }]}>
+          {detail}
+        </T>
+      )}
+      <View style={[base.row, { flexWrap: 'wrap' }]}>
+        {status === 'available' && !active && <Button title="Use this model" onPress={onUse} />}
+        {(status === 'downloadable' || status === 'downloading') && !progress && (
+          <Button title={status === 'downloading' ? 'Check progress' : 'Download'} onPress={download} />
+        )}
+      </View>
+    </Card>
   );
 }
 

@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.gemininano'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.gemininano"
+  defaultConfig {
+    // ML Kit GenAI requires API 26+.
+    minSdkVersion 26
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // Gemini Nano through Android AICore (runs on the Tensor TPU on Pixel 10).
+  // Pinned to beta4: beta5 is built with Kotlin 2.4, which this Expo/RN toolchain's
+  // Kotlin 2.2 compiler cannot read. beta4 (Kotlin 2.3) has every API used here.
+  implementation "com.google.mlkit:genai-prompt:1.0.0-beta4"
+}

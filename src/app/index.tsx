@@ -1,5 +1,3 @@
-import { getModel, type ModelSpec } from '@brume/ocr-engine';
-import { modelStatus } from '@brume/ocr-engine/native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
@@ -9,7 +7,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { READ_IN_PROGRESS_KEY, clearSetting, getSetting, listGames } from '@/db';
 import { perGame, seasonFor, seasonTotals, teamScore, validateGame, type Game } from '@brume/basketball';
-import { getActiveModelId } from '@/engine/host';
+import { activeModel, type ActiveModel } from '@/engine/host';
 import { Badge, Button, Card, StatusDot, T } from '@/ui/components';
 import { Logo } from '@/ui/Logo';
 import { base, fonts, space, useColors } from '@/ui/theme';
@@ -18,18 +16,18 @@ export default function Home() {
   const db = useSQLiteContext();
   const c = useColors();
   const [games, setGames] = useState<Game[]>([]);
-  const [model, setModel] = useState<{ spec: ModelSpec; ready: boolean } | null>(null);
+  const [model, setModel] = useState<ActiveModel | null>(null);
   const [killedMidRead, setKilledMidRead] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let live = true;
       (async () => {
-        const spec = getModel(await getActiveModelId(db));
+        const current = await activeModel(db);
         const list = await listGames(db);
         const interrupted = (await getSetting(db, READ_IN_PROGRESS_KEY)) !== null;
         if (!live) return;
-        setModel({ spec, ready: modelStatus(spec) === 'ready' });
+        setModel(current);
         setGames(list);
         setKilledMidRead(interrupted);
       })();
@@ -82,7 +80,7 @@ export default function Home() {
                 <T>
                   Android closed Brume while it was reading a page, almost always because the phone ran
                   low on memory. Close other apps and try again.
-                  {model ? ` ${model.spec.name} needs about ${(model.spec.approxRamBytes / 1e9).toFixed(1)} GB free.` : ''}
+                  {model?.approxRamBytes ? ` ${model.name} needs about ${(model.approxRamBytes / 1e9).toFixed(1)} GB free.` : ''}
                 </T>
                 <Button
                   title="OK"
@@ -99,7 +97,7 @@ export default function Home() {
               <Card style={{ backgroundColor: c.warnBg, borderColor: c.warnLine }}>
                 <T style={base.h2}>Download the reading model</T>
                 <T>
-                  Brume reads scoresheets entirely on this phone. It needs a one-time download of {model.spec.name}{' '}
+                  Brume reads scoresheets entirely on this phone. It needs a one-time download of {model.name}{' '}
                   first. Use Wi-Fi.
                 </T>
                 <Button title="Set up model" onPress={() => router.push('/models')} />
@@ -121,7 +119,7 @@ export default function Home() {
                   <View style={base.row}>
                     <StatusDot tone="ok" />
                     <T muted style={base.small}>
-                      {model.spec.name} ready · runs on this phone
+                      {model.name} ready · runs on this phone
                     </T>
                   </View>
                 )}
