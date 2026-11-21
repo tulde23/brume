@@ -3,6 +3,7 @@ export { SCOREBOOK_PAGE_TEMPLATE } from './template';
 export { dropFinalFromPeriods, isPlayerName, mergePlayers, normalizeDate, perPeriodScores, readPage, type PageReading } from './assemble';
 export { DEFAULT_RULES, teamScore, validateGame, validateTeam, type ValidationRules } from './validate';
 export { pct, perGame, seasonFor, seasonTotals, teamNames, type SeasonLine } from './stats';
+export { formatGamesBehind, formatPct, gameResults, standings, teamKey, type StandingRow, type TeamResult } from './standings';
 export { gameToCsv, gameToJson, seasonToCsv } from './export';
 export {
   DEFAULT_ENABLED,

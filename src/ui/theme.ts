@@ -23,6 +23,9 @@ const light = {
   /** Viewfinder logo: brackets and lines. */
   markBracket: '#22201C',
   markLine: '#2F5DA8',
+  /** League header band (standings, scores, leaders). */
+  header: '#22201C',
+  headerText: '#F7F3EA',
 };
 
 /** The same paper at night: warm charcoal stock, chalky ink, a lifted pencil blue. */
@@ -44,6 +47,8 @@ const dark: typeof light = {
   okBg: '#1B3122',
   markBracket: '#EFE8D8',
   markLine: '#8FB2EC',
+  header: '#0E0D0A',
+  headerText: '#EFE8D8',
 };
 
 export type Colors = typeof light;

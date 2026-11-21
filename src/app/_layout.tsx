@@ -16,8 +16,11 @@ import { DB_NAME, migrate } from '@/db';
 import { AnimatedSplash } from '@/ui/AnimatedSplash';
 import { DialogProvider } from '@/ui/Dialog';
 import { fonts, useColors } from '@/ui/theme';
+import { applyThemePreference } from '@/ui/themePreference';
 
 void SplashScreen.preventAutoHideAsync();
+// Light, dark or the phone's setting, as chosen under More > Appearance.
+applyThemePreference();
 
 export default function RootLayout() {
   const c = useColors();
@@ -58,6 +61,7 @@ export default function RootLayout() {
         <Stack.Screen name="templates" options={{ title: 'Scorebook templates' }} />
         <Stack.Screen name="template-editor" options={{ title: 'Template' }} />
         <Stack.Screen name="bench" options={{ title: 'Test bench' }} />
+        <Stack.Screen name="team/[key]" options={{ headerShown: false }} />
         <Stack.Screen name="game/[id]" options={{ title: 'Game' }} />
         <Stack.Screen name="game/box" options={{ title: 'Box score' }} />
         <Stack.Screen name="game/check" options={{ title: 'Check', presentation: 'modal', headerShown: false }} />
