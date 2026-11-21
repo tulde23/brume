@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
+  <style>.b{stroke:#22201C}.l{stroke:#2F5DA8}@media (prefers-color-scheme:dark){.b{stroke:#EFE8D8}.l{stroke:#8FB2EC}}</style>
+  <g class="b" fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 22 L6 6 L22 6"/><path d="M50 6 L66 6 L66 22"/><path d="M6 50 L6 66 L22 66"/><path d="M66 50 L66 66 L50 66"/>
+  </g>
+  <g class="l" stroke-width="6" stroke-linecap="round">
+    <path d="M20 28 L52 28"/><path d="M16 38 L56 38" opacity="0.65"/><path d="M24 48 L46 48" opacity="0.4"/>
+  </g>
+</svg>

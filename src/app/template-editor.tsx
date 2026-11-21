@@ -53,10 +53,11 @@ import { Button, Card, ProgressBar, T } from '@/ui/components';
 import { PageMarker, PhotoCrop, type MarkerShape } from '@/ui/PageMarker';
 import { PART_COLORS } from '@/ui/partColors';
 import { ReadingView, progressRect } from '@/ui/ReadingView';
+import { AskPhase, IntroPhase, PageHint } from '@/ui/TemplateGuide';
 import { useDialog } from '@/ui/Dialog';
 import { base, fonts, space, useColors, type Colors } from '@/ui/theme';
 
-type Phase = 'photo' | 'pick' | 'mark' | 'review' | 'test';
+type Phase = 'intro' | 'photo' | 'pick' | 'mark' | 'review' | 'test';
 
 /**
  * Side margin around the marking photo. Android's back gesture claims swipes that
@@ -66,7 +67,7 @@ type Phase = 'photo' | 'pick' | 'mark' | 'review' | 'test';
 const EDGE = 28;
 const PHASES: { key: Phase[]; label: string }[] = [
   { key: ['photo'], label: 'Photo' },
-  { key: ['pick'], label: 'Pick' },
+  { key: ['pick'], label: 'Questions' },
   { key: ['mark'], label: 'Mark' },
   { key: ['review', 'test'], label: 'Check' },
 ];
@@ -118,7 +119,11 @@ export default function TemplateEditor() {
   const { width: screenW, height: screenH } = useWindowDimensions();
 
   const [tpl, setTpl] = useState<ScorebookTemplate | null>(null);
-  const [phase, setPhase] = useState<Phase>('photo');
+  // New templates open on a short intro; existing ones open on review (set when loaded).
+  const [phase, setPhase] = useState<Phase>('intro');
+  // Questions about the page (-1: the recognised-book offer), or the full parts list.
+  const [question, setQuestion] = useState(-1);
+  const [advanced, setAdvanced] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [detail, setDetail] = useState(0);
   const [aspect, setAspect] = useState<number | null>(null);
@@ -217,6 +222,30 @@ export default function TemplateEditor() {
     setPhase('mark');
   };
 
+  /** Puts every part's box where the photo suggests, then goes to review. */
+  const autoPlace = () => {
+    const lib = current?.library;
+    if (lib) {
+      // A known book: use its parts, lined up to this photo.
+      update((t) => ({
+        ...t,
+        enabled: lib.layout.enabled,
+        parts: { ...lib.parts },
+        variants: { ...lib.layout.variants },
+        builtinId: lib.layout.id,
+      }));
+      setAutoPlaced({ parts: lib.layout.enabled, recognised: lib.layout.name });
+    } else {
+      update((t) => {
+        const parts = { ...t.parts };
+        for (const p of t.enabled) parts[p] = startRect(p);
+        return { ...t, parts };
+      });
+      setAutoPlaced({ parts: tpl.enabled.filter((p) => suggested?.found.includes(p)), recognised: null });
+    }
+    setPhase('review');
+  };
+
   const save = async (t: ScorebookTemplate) => {
     // Keep this photo's printed labels, so later photos can be lined up with the boxes.
     const clean = normalizeTemplate({ ...t, anchors: t.anchors ?? current?.anchors });
@@ -235,7 +264,9 @@ export default function TemplateEditor() {
     <SafeAreaView style={[base.screen, { backgroundColor: c.bg }]} edges={['bottom']}>
       {/* Edge swipes are for moving boxes here, not going back (iOS; Android's system gesture is avoided by the photo's side margins). */}
       <Stack.Screen options={{ title: tpl.name || 'Template', gestureEnabled: false }} />
-      <Stepper phase={phase} c={c} fraction={phase === 'mark' ? (stepIndex + 1) / steps.length : 0} />
+      {phase !== 'intro' && <Stepper phase={phase} c={c} fraction={phase === 'mark' ? (stepIndex + 1) / steps.length : 0} />}
+
+      {phase === 'intro' && <IntroPhase hasPhoto={!!photo} onStart={() => setPhase('photo')} />}
 
       {phase === 'photo' && (
         <PhotoPhase
@@ -245,45 +276,52 @@ export default function TemplateEditor() {
           width={screenW - space.lg * 2}
           onName={(name) => update((t) => ({ ...t, name }))}
           onPhoto={(u) => update((t) => ({ ...t, photoUri: keepImage(u, t.id, 'photo') }))}
-          onNext={() => setPhase('pick')}
+          onNext={() => {
+            setQuestion(-1);
+            setAdvanced(false);
+            setPhase('pick');
+          }}
         />
       )}
 
-      {phase === 'pick' && (
+      {phase === 'pick' && !advanced && (
+        <AskPhase
+          tpl={tpl}
+          question={question}
+          recognised={current?.library?.layout.name ?? null}
+          placing={!!photo && placement?.uri !== photo}
+          onQuestion={setQuestion}
+          onAnswer={(parts, yes) =>
+            update((t) => ({
+              ...t,
+              enabled: yes ? [...new Set([...t.enabled, ...parts])] : t.enabled.filter((x) => !parts.includes(x)),
+            }))
+          }
+          onUseRecognised={autoPlace}
+          onBack={() => setPhase('photo')}
+          onStartMarking={() => {
+            setAutoPlaced(null);
+            enterStep(0);
+          }}
+          onPlaceAll={autoPlace}
+          onAdvanced={() => setAdvanced(true)}
+        />
+      )}
+
+      {phase === 'pick' && advanced && (
         <PickPhase
           tpl={tpl}
           c={c}
           onToggle={(p, on) =>
             update((t) => ({ ...t, enabled: on ? [...t.enabled, p] : t.enabled.filter((x) => x !== p) }))
           }
-          onBack={() => setPhase('photo')}
+          onBack={() => setAdvanced(false)}
           onNext={() => {
             setAutoPlaced(null);
             enterStep(0);
           }}
           placing={!!photo && placement?.uri !== photo}
-          onAuto={() => {
-            const lib = current?.library;
-            if (lib) {
-              // A known book: use its parts, lined up to this photo.
-              update((t) => ({
-                ...t,
-                enabled: lib.layout.enabled,
-                parts: { ...lib.parts },
-                variants: { ...lib.layout.variants },
-                builtinId: lib.layout.id,
-              }));
-              setAutoPlaced({ parts: lib.layout.enabled, recognised: lib.layout.name });
-            } else {
-              update((t) => {
-                const parts = { ...t.parts };
-                for (const p of t.enabled) parts[p] = startRect(p);
-                return { ...t, parts };
-              });
-              setAutoPlaced({ parts: tpl.enabled.filter((p) => suggested?.found.includes(p)), recognised: null });
-            }
-            setPhase('review');
-          }}
+          onAuto={autoPlace}
         />
       )}
 
@@ -294,6 +332,7 @@ export default function TemplateEditor() {
           step={step}
           stepNumber={stepIndex + 1}
           stepCount={steps.length}
+          found={(p) => !!current?.library?.parts[p] || !!suggested?.found.includes(p)}
           detail={Math.min(detail, step.parts.length - 1)}
           onDetail={setDetail}
           c={c}
@@ -306,7 +345,12 @@ export default function TemplateEditor() {
           onBack={() => {
             if (step.parts.length > 1 && detail > 0) setDetail(detail - 1);
             else if (stepIndex > 0) enterStep(stepIndex - 1, stepsFor(tpl)[stepIndex - 1].parts.length - 1);
-            else setPhase('pick');
+            else {
+              // Back from the first part: the summary of what is being marked.
+              setQuestion(99);
+              setAdvanced(false);
+              setPhase('pick');
+            }
           }}
           onSkip={(p) => {
             update((t) => ({ ...t, enabled: t.enabled.filter((x) => x !== p), parts: { ...t.parts, [p]: undefined } }));
@@ -349,7 +393,10 @@ export default function TemplateEditor() {
           onRemove={(p) => update((t) => ({ ...t, enabled: t.enabled.filter((x) => x !== p), parts: { ...t.parts, [p]: undefined } }))}
           onVariant={(p, v) => update((t) => ({ ...t, variants: { ...t.variants, [p]: v } }))}
           lines={current?.lines ?? null}
-          onAdd={() => setPhase('pick')}
+          onAdd={() => {
+            setAdvanced(true);
+            setPhase('pick');
+          }}
           onTest={() => setPhase('test')}
           onSave={async () => {
             await save(tpl);
@@ -504,11 +551,16 @@ function RegionChooser({
 }
 
 function WhyCard({ text, c }: { text: string; c: Colors }) {
+  const [open, setOpen] = useState(false);
   return (
-    <View style={[styles.why, { backgroundColor: c.accent + '1F' }]}>
-      <T style={{ fontSize: 13, fontFamily: fonts.bodyBold, color: c.accent }}>Why InkStat needs this</T>
-      <T style={{ fontSize: 14, lineHeight: 20 }}>{text}</T>
-    </View>
+    <Pressable
+      onPress={() => setOpen((o) => !o)}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      style={[styles.why, { backgroundColor: c.accent + '1F' }]}>
+      <T style={{ fontSize: 13, fontFamily: fonts.bodyBold, color: c.accent }}>{`Why InkStat needs this ${open ? '\u25B4' : '\u25BE'}`}</T>
+      {open && <T style={{ fontSize: 14, lineHeight: 20 }}>{text}</T>}
+    </Pressable>
   );
 }
 
@@ -685,6 +737,7 @@ function MarkPhase({
   step,
   stepNumber,
   stepCount,
+  found,
   detail,
   onDetail,
   c,
@@ -702,6 +755,7 @@ function MarkPhase({
   step: Step;
   stepNumber: number;
   stepCount: number;
+  found: (p: PartId) => boolean;
   detail: number;
   onDetail: (i: number) => void;
   c: Colors;
@@ -728,9 +782,9 @@ function MarkPhase({
     .map((p) => ({ id: p, rect: fullRect(tpl, p)!, color: PART_COLORS[p] }));
 
   const nextLabel = (() => {
-    if (step.parts.length > 1 && detail < step.parts.length - 1) return `Next: ${partSpec(step.parts[detail + 1]).name.toLowerCase()}`;
-    if (stepNumber < stepCount) return 'Next';
-    return 'Review';
+    if (step.parts.length > 1 && detail < step.parts.length - 1) return `Looks right · next: ${partSpec(step.parts[detail + 1]).name.toLowerCase()}`;
+    if (stepNumber < stepCount) return 'Looks right · next';
+    return 'Looks right · finish';
   })();
 
   // What InkStat will see for the player table: its columns joined, top few rows.
@@ -772,7 +826,26 @@ function MarkPhase({
           {spec.variants && (
             <VariantPicker part={part} value={variantOf(tpl, part)} onChange={(v) => onVariant(part, v)} c={c} />
           )}
-          <T style={{ fontSize: 15, lineHeight: 21 }}>{part === 'fouls' && variantOf(tpl, 'fouls') === 'total' ? 'Drag across the F total column only.' : spec.instruction}</T>
+          <View style={[base.row, { alignItems: 'flex-start', gap: space.md, marginTop: 4 }]}>
+            <View style={{ flex: 1, gap: 6 }}>
+              <T style={{ fontSize: 16, lineHeight: 22, fontFamily: fonts.bodySemiBold }}>
+                {part === 'fouls' && variantOf(tpl, 'fouls') === 'total' ? 'Drag across the F total column only.' : spec.instruction}
+              </T>
+              {found(part) ? (
+                <T style={{ fontSize: 13.5, lineHeight: 19, color: c.ok, fontFamily: fonts.bodySemiBold }}>
+                  {'\u2713 InkStat placed this box from the printed labels. Check it, then tap Looks right.'}
+                </T>
+              ) : (
+                <T muted style={{ fontSize: 13.5, lineHeight: 19 }}>
+                  The box starts where most scoresheets put it. Drag it onto the same thing on your page.
+                </T>
+              )}
+            </View>
+            <View style={{ alignItems: 'center', gap: 2 }}>
+              <PageHint parts={[part]} width={64} />
+              <T muted style={{ fontSize: 11 }}>Usually here</T>
+            </View>
+          </View>
         </View>
 
         <View style={styles.markerWrap}>

@@ -41,6 +41,7 @@ docker run -p 8787:8787 -v inkstat-data:/data -e INKSTAT_AUTH_KEY="<64 hex>" ink
    | `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` | The Sign in with Apple key (.p8 contents; `
 ` allowed). Needed to revoke Apple tokens on account deletion (App Store 5.1.1(v)). |
    | `INKSTAT_API_KEYS` | Optional, legacy: `eagles:<key>` shared-key spaces from the first sync build. |
+   | `PUBLIC_WEB_ORIGINS` | Optional: more browser origins (comma-separated) allowed to read `/v1/public/*`, e.g. the web service's `*.up.railway.app` URL. `https://inkstat.app` and `https://www.inkstat.app` are always allowed. |
 
    A provider with no client ids is simply off (`503 NotConfigured`).
 3. **Settings → Volumes → Add volume**, mount path `/data`. The server finds it through `RAILWAY_VOLUME_MOUNT_PATH`.
@@ -114,6 +115,15 @@ Each account has its own space, so a scorekeeper's games and templates follow th
 | POST / GET | `/v1/templates[/:id]` | A layout (parts, variants, anchors); unknown parts and non-vocabulary anchors are dropped |
 | POST | `/v1/results` | `{ sport, date, homeId, awayId, homeScore, awayScore, periods? }` → `reported`, `confirmed` (2 agree) or `disputed` |
 | GET / DELETE | `/v1/results/:id` | Read; withdraw my report |
+
+### Public scoreboard (anonymous, read-only)
+
+What https://inkstat.app (`web/`) shows. No sign-in; GET only; 120 requests a minute per address; CORS for inkstat.app; `Cache-Control: public, max-age=60`. Team names, places (town, state), dates and final scores only: never players, rosters, groups, scorekeepers or report counts. A disputed result has `null` scores.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/v1/public/seasons?sport=` | `{ seasons: [{ season, games }] }`, newest first |
+| GET | `/v1/public/scoreboard?season=&sport=` | `{ sport, season, seasons, teams: [{ id, name, town, state, level, gender }], results: [{ id, date, home: { id, score }, away: { id, score }, status }] }`, newest first; `season` defaults to the newest with results |
 
 ### Games sync (per group, or a legacy key space at `/v1/games`)
 

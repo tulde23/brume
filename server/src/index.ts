@@ -42,6 +42,7 @@ const app = createApp({
   groups: createGroups(db),
   registry: createRegistry(db),
   version: env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'dev',
+  extraOrigins: (env.PUBLIC_WEB_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean),
 });
 for (const p of ['Google', 'Apple'] as const) {
   if (!identities.isConfigured(p)) console.log(`Sign in with ${p} is off (no client ids).`);

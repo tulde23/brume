@@ -106,6 +106,24 @@ export interface Result {
   reports: number;
 }
 
+/** What the public scoreboard shows of a team: its name and where it plays. */
+export interface PublicTeam {
+  id: string;
+  name: string;
+  town: string | null;
+  state: string | null;
+  level: Level;
+  gender: Gender;
+}
+
+export interface PublicResult {
+  id: string;
+  date: string;
+  home: { id: string; score: number | null };
+  away: { id: string; score: number | null };
+  status: ResultStatus;
+}
+
 export interface RosterPlayer {
   number: string | null;
   name: string | null;
@@ -173,6 +191,12 @@ export function createRegistry(db: DB, now: () => number = Date.now) {
     ),
     teamResults: db.prepare<[string, string, string], { id: string }>(
       'SELECT id FROM results WHERE (home_id = ? OR away_id = ?) AND season = ? ORDER BY date DESC',
+    ),
+    seasonResults: db.prepare<[string, string], { id: string }>(
+      'SELECT id FROM results WHERE sport = ? AND season = ? ORDER BY date DESC, created_at DESC LIMIT 5000',
+    ),
+    seasons: db.prepare<[string], { season: string; n: number }>(
+      'SELECT season, COUNT(*) AS n FROM results WHERE sport = ? GROUP BY season ORDER BY season DESC',
     ),
     retract: db.prepare('DELETE FROM result_reports WHERE result_id = ? AND user_id = ?'),
     orphanResults: db.prepare('DELETE FROM results WHERE id = ? AND NOT EXISTS (SELECT 1 FROM result_reports WHERE result_id = ?)'),
@@ -407,6 +431,35 @@ export function createRegistry(db: DB, now: () => number = Date.now) {
       }
       return [...table.values()].sort((x, y) => y.w - x.w || x.l - y.l || (y.pf - y.pa) - (x.pf - x.pa));
     },
+
+    // --- the public scoreboard (inkstat.app) ---
+
+    /**
+     * A season's scores for anyone to read: team names, places, dates and final scores.
+     * Nothing from a group, no rosters, no scorekeepers, no report counts. A disputed
+     * result shows no score, since nobody can say which one is right.
+     */
+    publicSeason(sport: string, season: string) {
+      const results = q.seasonResults.all(sport, season).map((r) => resultOf(r.id)).filter((r): r is Result => r !== null);
+      const teams = new Map<string, PublicTeam>();
+      const side = (s: Result['home'], disputed: boolean) => {
+        if (!teams.has(s.id)) {
+          const t = live(s.id);
+          teams.set(t.id, { id: t.id, name: t.name, town: t.town, state: t.state, level: t.level, gender: t.gender });
+        }
+        return { id: s.id, score: disputed ? null : s.score };
+      };
+      const games: PublicResult[] = results.map((r) => ({
+        id: r.id,
+        date: r.date,
+        home: side(r.home, r.status === 'disputed'),
+        away: side(r.away, r.status === 'disputed'),
+        status: r.status,
+      }));
+      return { teams: [...teams.values()], results: games };
+    },
+
+    publicSeasons: (sport: string) => q.seasons.all(sport).map((s) => ({ season: s.season, games: s.n })),
 
     // --- inside a group ---
 

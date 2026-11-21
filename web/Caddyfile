@@ -1,0 +1,29 @@
+# inkstat.app: the built site, with client routes falling back to index.html.
+{
+	admin off
+	auto_https off
+}
+
+:{$PORT:8080} {
+	@www host www.inkstat.app
+	redir @www https://inkstat.app{uri} permanent
+
+	root * /srv
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.inkstat.app; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
+	}
+	# Hashed build files never change; everything else is checked each visit.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@pages not path /assets/*
+	header @pages Cache-Control "no-cache"
+
+	try_files {path} /index.html
+	file_server
+}

@@ -1,6 +1,7 @@
 import { gameToCsv, gameToJson, seasonFor, seasonToCsv, seasonTotals, validateGame } from '@inkstat/basketball';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { z } from 'zod';
@@ -22,6 +23,8 @@ type C = Context<Env>;
 /** Reject timestamps more than a day ahead: a phone with a bad clock would otherwise win every conflict forever. */
 const MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 const MAX_PAGE = 500;
+/** Browsers allowed to read the public scoreboard. */
+const PUBLIC_ORIGINS = ['https://inkstat.app', 'https://www.inkstat.app', 'http://localhost:5173', 'http://localhost:4173'];
 
 const sport = z.enum(SPORTS as [string, ...string[]]);
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be yyyy-mm-dd');
@@ -89,6 +92,7 @@ export function createApp({
   registry,
   version = 'dev',
   log = true,
+  extraOrigins = [],
 }: {
   store: Store;
   docs: Docs;
@@ -98,10 +102,15 @@ export function createApp({
   registry: Registry;
   version?: string;
   log?: boolean;
+  /** More browser origins for the public scoreboard, e.g. the web service's Railway URL. */
+  extraOrigins?: string[];
 }) {
   const app = new Hono<Env>();
 
-  app.use(secureHeaders());
+  // The public scoreboard is read from inkstat.app, another origin; everything else stays same-origin.
+  const strict = secureHeaders();
+  const shared = secureHeaders({ crossOriginResourcePolicy: 'cross-origin' });
+  app.use((c, next) => (c.req.path.startsWith('/v1/public/') ? shared(c, next) : strict(c, next)));
   if (log) app.use(logger());
   app.use('/v1/*', bodyLimit({ maxSize: 512 * 1024, onError: () => { throw new ApiError(413, 'TooLarge', 'That request is too large.'); } }));
 
@@ -139,6 +148,36 @@ export function createApp({
     await accounts.appleNotification(payload);
     return c.body(null, 200);
   });
+
+  // ---------------------------------------------------------------- public scoreboard (anonymous, read-only)
+
+  /**
+   * What https://inkstat.app shows: the registry's team names, places, dates and scores.
+   * Never anything from a group, never a player, never an account. GET only.
+   */
+  const pub = new Hono<Env>();
+  pub.use(cors({ origin: [...PUBLIC_ORIGINS, ...extraOrigins], allowMethods: ['GET'], maxAge: 86400 }));
+  pub.use(rateLimit<Env>(120, 60_000, (c) => `pub:${clientAddress(c.req.header('x-forwarded-for'))}`));
+  pub.use(async (c, next) => {
+    await next();
+    if (c.res.status === 200) c.header('Cache-Control', 'public, max-age=60');
+  });
+  const pubSport = (c: C) => {
+    const s = sport.safeParse(c.req.query('sport') ?? 'basketball');
+    if (!s.success) throw ApiError.badRequest('InvalidRequest', 'Unknown sport.');
+    return s.data;
+  };
+  const seasonParam = z.string().regex(/^\d{4}-\d{2}$/);
+  pub.get('/seasons', (c) => c.json({ seasons: registry.publicSeasons(pubSport(c)) }));
+  pub.get('/scoreboard', (c) => {
+    const s = pubSport(c);
+    const seasons = registry.publicSeasons(s);
+    const asked = c.req.query('season');
+    if (asked && !seasonParam.safeParse(asked).success) throw ApiError.badRequest('InvalidRequest', 'season must look like 2026-27.');
+    const season = asked || seasons[0]?.season || seasonFor(null);
+    return c.json({ sport: s, season, seasons, ...registry.publicSeason(s, season) });
+  });
+  v1.route('/public', pub);
 
   // ---------------------------------------------------------------- signed-in routes
 

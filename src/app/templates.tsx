@@ -12,7 +12,7 @@ import { base, fonts, space, useColors } from '@/ui/theme';
 
 const HOW = [
   ['1', 'Photo', 'One clear, filled-in page'],
-  ['2', 'Pick', 'What InkStat should read'],
+  ['2', 'Questions', 'What your page has on it'],
   ['3', 'Mark', 'Draw a box on each part'],
   ['4', 'Check', 'Test read, then save'],
 ];

@@ -170,6 +170,10 @@ const MIGRATIONS = [
   );
   CREATE INDEX docs_by_seq ON docs (space, collection, seq);
   `,
+  // 4: the public scoreboard reads a whole season at once.
+  `
+  CREATE INDEX results_by_season ON results (sport, season, date);
+  `,
 ];
 
 export function openDb(file: string): DB {
